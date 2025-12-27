@@ -4,8 +4,64 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>YouTube Comment Monitor</title>
+  <title>YT Comment Carbon Copy</title>
   <style>
+    :root {
+      /* Light theme colors */
+      --bg-primary: #ffffff;
+      --bg-secondary: #f5f5f5;
+      --bg-card: #ffffff;
+      --bg-card-deleted: #fdf2f2;
+      --bg-button: #f5f5f5;
+      --bg-button-hover: #e5e5e5;
+      --bg-status-error: #fdf2f2;
+      --bg-status-success: #f0fdf0;
+
+      --text-primary: #333333;
+      --text-secondary: #666666;
+      --text-accent: #cc0000;
+      --text-error: #cc0000;
+      --text-success: #008800;
+      --text-deleted: #e74c3c;
+      --text-active: #27ae60;
+
+      --border-primary: #dddddd;
+      --border-deleted: #e74c3c;
+
+      --btn-primary-bg: #cc0000;
+      --btn-primary-hover: #aa0000;
+      --btn-disabled: #cccccc;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        /* Dark theme colors */
+        --bg-primary: #1a1a1a;
+        --bg-secondary: #2a2a2a;
+        --bg-card: #252525;
+        --bg-card-deleted: #3a2020;
+        --bg-button: #2a2a2a;
+        --bg-button-hover: #3a3a3a;
+        --bg-status-error: #3a2020;
+        --bg-status-success: #1a3a1a;
+
+        --text-primary: #e0e0e0;
+        --text-secondary: #a0a0a0;
+        --text-accent: #ff4444;
+        --text-error: #ff4444;
+        --text-success: #44ff44;
+        --text-deleted: #ff6b6b;
+        --text-active: #4ade80;
+
+        --border-primary: #404040;
+        --border-deleted: #ff6b6b;
+
+        --btn-primary-bg: #cc0000;
+        --btn-primary-hover: #ee0000;
+        --btn-disabled: #555555;
+      }
+    }
+
     * {
       box-sizing: border-box;
       margin: 0;
@@ -17,19 +73,20 @@
       padding: 16px;
       font-family: system-ui, -apple-system, sans-serif;
       font-size: 14px;
-      color: #333;
+      color: var(--text-primary);
+      background: var(--bg-primary);
     }
 
     h2 {
       font-size: 16px;
       margin-bottom: 12px;
-      color: #c00;
+      color: var(--text-accent);
     }
 
     #status {
       padding: 8px;
       margin-bottom: 12px;
-      background: #f5f5f5;
+      background: var(--bg-secondary);
       border-radius: 4px;
       font-size: 13px;
       min-height: 20px;
@@ -40,36 +97,70 @@
     }
 
     #status.error {
-      background: #fdf2f2;
-      color: #c00;
+      background: var(--bg-status-error);
+      color: var(--text-error);
     }
 
     #status.success {
-      background: #f0fdf0;
-      color: #080;
+      background: var(--bg-status-success);
+      color: var(--text-success);
     }
 
     #controls {
       margin-bottom: 16px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
     }
 
     #controls button {
       padding: 8px 16px;
-      background: #c00;
+      background: var(--btn-primary-bg);
       color: white;
       border: none;
       border-radius: 4px;
       cursor: pointer;
       font-size: 13px;
+      flex: 1;
+      min-width: 120px;
     }
 
     #controls button:hover {
-      background: #a00;
+      background: var(--btn-primary-hover);
     }
 
     #controls button:disabled {
-      background: #ccc;
+      background: var(--btn-disabled);
       cursor: not-allowed;
+    }
+
+    #progress {
+      padding: 8px;
+      margin-bottom: 12px;
+      background: var(--bg-secondary);
+      border-radius: 4px;
+      font-size: 12px;
+      display: none;
+    }
+
+    #progress.visible {
+      display: block;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 4px;
+      background: var(--border-primary);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-top: 6px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--btn-primary-bg);
+      transition: width 0.3s ease;
+      width: 0%;
     }
 
     #comment-list {
@@ -78,16 +169,16 @@
     }
 
     .comment-card {
-      border: 1px solid #ddd;
+      border: 1px solid var(--border-primary);
       padding: 10px;
       margin-bottom: 8px;
       border-radius: 6px;
-      background: #fff;
+      background: var(--bg-card);
     }
 
     .comment-card.deleted {
-      border-color: #e74c3c;
-      background: #fdf2f2;
+      border-color: var(--border-deleted);
+      background: var(--bg-card-deleted);
     }
 
     .comment-text {
@@ -102,7 +193,7 @@
       justify-content: space-between;
       align-items: center;
       font-size: 11px;
-      color: #666;
+      color: var(--text-secondary);
     }
 
     .comment-info {
@@ -123,32 +214,33 @@
     }
 
     .status-badge.deleted {
-      color: #e74c3c;
+      color: var(--text-deleted);
     }
 
     .status-badge.active {
-      color: #27ae60;
+      color: var(--text-active);
     }
 
     .copy-btn {
       padding: 4px 8px;
       font-size: 11px;
-      background: #f5f5f5;
-      border: 1px solid #ddd;
+      background: var(--bg-button);
+      border: 1px solid var(--border-primary);
       border-radius: 3px;
       cursor: pointer;
       margin-left: 8px;
       flex-shrink: 0;
+      color: var(--text-primary);
     }
 
     .copy-btn:hover {
-      background: #e5e5e5;
+      background: var(--bg-button-hover);
     }
 
     #empty-state {
       padding: 24px;
       text-align: center;
-      color: #666;
+      color: var(--text-secondary);
       font-size: 13px;
     }
 
@@ -159,12 +251,20 @@
 </head>
 
 <body>
-  <h2>YouTube Comment Monitor</h2>
+  <h2>YT Comment Carbon Copy</h2>
 
   <div id="status"></div>
 
+  <div id="progress">
+    <div id="progress-text">Checking comments...</div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progress-fill"></div>
+    </div>
+  </div>
+
   <div id="controls">
     <button id="checkBtn">Check Current Video</button>
+    <button id="checkAllBtn">Check All Comments</button>
   </div>
 
   <div id="comment-list"></div>

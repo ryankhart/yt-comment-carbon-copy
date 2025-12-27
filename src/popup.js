@@ -1,10 +1,11 @@
-// YouTube Comment Monitor - Popup Script
+// YT Comment Carbon Copy - Popup Script
 
 document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
   await loadComments();
   document.getElementById('checkBtn').addEventListener('click', handleCheck);
+  document.getElementById('checkAllBtn').addEventListener('click', handleCheckAll);
 }
 
 // Load and display all comments
@@ -75,6 +76,114 @@ function createCommentCard(comment) {
       </div>
     </div>
   `;
+}
+
+// Show/hide progress indicator
+function showProgress(text, percent) {
+  const progress = document.getElementById('progress');
+  const progressText = document.getElementById('progress-text');
+  const progressFill = document.getElementById('progress-fill');
+
+  progress.classList.add('visible');
+  progressText.textContent = text;
+  progressFill.style.width = `${percent}%`;
+}
+
+function hideProgress() {
+  const progress = document.getElementById('progress');
+  progress.classList.remove('visible');
+}
+
+// Handle "Check All Comments" button click
+async function handleCheckAll() {
+  const checkBtn = document.getElementById('checkBtn');
+  const checkAllBtn = document.getElementById('checkAllBtn');
+
+  checkBtn.disabled = true;
+  checkAllBtn.disabled = true;
+  showStatus('Starting batch check...', '');
+
+  try {
+    const response = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ action: 'GET_COMMENTS' }, resolve);
+    });
+
+    if (!response?.success) {
+      showStatus('Failed to load comments', 'error');
+      checkBtn.disabled = false;
+      checkAllBtn.disabled = false;
+      return;
+    }
+
+    const allComments = Object.values(response.comments);
+    const activeComments = allComments.filter(c => c.status === 'active');
+
+    if (activeComments.length === 0) {
+      showStatus('No active comments to check', 'success');
+      checkBtn.disabled = false;
+      checkAllBtn.disabled = false;
+      return;
+    }
+
+    // Group comments by video
+    const commentsByVideo = {};
+    for (const comment of activeComments) {
+      if (!commentsByVideo[comment.videoId]) {
+        commentsByVideo[comment.videoId] = [];
+      }
+      commentsByVideo[comment.videoId].push(comment);
+    }
+
+    const videoIds = Object.keys(commentsByVideo);
+    const totalVideos = videoIds.length;
+    let processedVideos = 0;
+    let totalDeleted = 0;
+
+    showProgress(`Checking 0/${totalVideos} videos...`, 0);
+
+    // Process each video
+    for (const videoId of videoIds) {
+      const comments = commentsByVideo[videoId];
+      const videoTitle = comments[0].videoTitle || 'Unknown video';
+
+      showProgress(`Checking "${videoTitle.substring(0, 30)}..." (${processedVideos + 1}/${totalVideos})`,
+                   (processedVideos / totalVideos) * 100);
+
+      try {
+        const result = await new Promise((resolve) => {
+          chrome.runtime.sendMessage(
+            { action: 'CHECK_ALL_COMMENTS', videoId, comments },
+            resolve
+          );
+        });
+
+        if (result?.deletedCount) {
+          totalDeleted += result.deletedCount;
+        }
+      } catch (error) {
+        console.error(`Failed to check video ${videoId}:`, error);
+      }
+
+      processedVideos++;
+
+      // Small delay between videos to avoid overwhelming YouTube
+      if (processedVideos < totalVideos) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    hideProgress();
+    showStatus(`Checked ${activeComments.length} comment${activeComments.length !== 1 ? 's' : ''} across ${totalVideos} video${totalVideos !== 1 ? 's' : ''}. ${totalDeleted} deleted.`, 'success');
+
+    // Refresh the comment list
+    await loadComments();
+  } catch (error) {
+    hideProgress();
+    showStatus('Error during batch check: ' + error.message, 'error');
+  } finally {
+    checkBtn.disabled = false;
+    checkAllBtn.disabled = false;
+  }
 }
 
 // Handle "Check Current Video" button click

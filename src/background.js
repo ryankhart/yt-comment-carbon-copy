@@ -1,4 +1,4 @@
-// YouTube Comment Monitor - Background Service Worker
+// YT Comment Carbon Copy - Background Service Worker
 
 // Initialize storage on install
 chrome.runtime.onInstalled.addListener(() => {
@@ -100,8 +100,59 @@ async function handleCheckComments(videoId) {
       message: `Checked ${toCheck.length} comment${toCheck.length !== 1 ? 's' : ''}. ${deletedCount} deleted.`
     };
   } catch (error) {
-    console.error('[YT Comment Monitor] Check failed:', error);
+    console.error('[YT Comment Carbon Copy] Check failed:', error);
     return { success: false, message: 'Failed to check comments. Make sure you are on a YouTube video page.' };
+  }
+}
+
+// Handle checking all comments for a video by opening it in a background tab
+async function handleCheckAllComments(videoId, comments) {
+  try {
+    // Open the video in a new tab (in background)
+    const tab = await chrome.tabs.create({
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+      active: false
+    });
+
+    // Wait for the tab to load and comments section to be ready
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // Send verification request to the content script
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      action: 'VERIFY_COMMENTS',
+      comments: comments
+    });
+
+    // Update storage for deleted comments
+    let deletedCount = 0;
+    if (response?.results) {
+      for (const result of response.results) {
+        if (!result.found) {
+          await updateCommentStatus(result.id, 'deleted', Date.now());
+          deletedCount++;
+        } else {
+          await updateCommentStatus(result.id, 'active');
+        }
+      }
+    }
+
+    // Close the tab
+    await chrome.tabs.remove(tab.id);
+
+    return {
+      success: true,
+      videoId,
+      deletedCount,
+      checkedCount: comments.length
+    };
+  } catch (error) {
+    console.error('[YT Comment Carbon Copy] Batch check failed for video:', videoId, error);
+    return {
+      success: false,
+      videoId,
+      error: error.message,
+      deletedCount: 0
+    };
   }
 }
 
@@ -112,7 +163,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       saveComment(message.payload)
         .then(id => sendResponse({ success: true, id }))
         .catch(error => {
-          console.error('[YT Comment Monitor] Save failed:', error);
+          console.error('[YT Comment Carbon Copy] Save failed:', error);
           sendResponse({ success: false, error: error.message });
         });
       return true; // Keep channel open for async response
@@ -121,7 +172,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       getComments()
         .then(comments => sendResponse({ success: true, comments }))
         .catch(error => {
-          console.error('[YT Comment Monitor] Get failed:', error);
+          console.error('[YT Comment Carbon Copy] Get failed:', error);
           sendResponse({ success: false, error: error.message });
         });
       return true;
@@ -130,8 +181,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       handleCheckComments(message.videoId)
         .then(sendResponse)
         .catch(error => {
-          console.error('[YT Comment Monitor] Check failed:', error);
+          console.error('[YT Comment Carbon Copy] Check failed:', error);
           sendResponse({ success: false, message: error.message });
+        });
+      return true;
+
+    case 'CHECK_ALL_COMMENTS':
+      handleCheckAllComments(message.videoId, message.comments)
+        .then(sendResponse)
+        .catch(error => {
+          console.error('[YT Comment Carbon Copy] Batch check failed:', error);
+          sendResponse({ success: false, error: error.message });
         });
       return true;
 

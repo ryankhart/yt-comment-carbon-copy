@@ -11,30 +11,56 @@ YT Comment Carbon Copy is a Chrome Manifest V3 extension that captures comments 
 ### Content Script ([content.js](src/content.js))
 - Injected into all YouTube pages (`*://*.youtube.com/*`)
 - Uses MutationObserver to detect when comment submit button appears
-- Captures comment text on submit and sends to background script
+- Captures comment text on submit (both click and Ctrl/Cmd+Enter) and sends to background script
+- Supports both regular videos and YouTube Shorts
+- Deduplicates captures to avoid saving the same comment twice
 - Responds to VERIFY_COMMENTS requests to check if comments still exist on page
 
 ### Background Service Worker ([background.js](src/background.js))
 - Central message hub and storage manager
-- Handles SAVE_COMMENT, GET_COMMENTS, CHECK_COMMENTS actions
+- Handles SAVE_COMMENT, GET_COMMENTS, CHECK_COMMENTS, CHECK_ALL_COMMENTS actions
 - Stores comments in `chrome.storage.local` with structure:
   ```javascript
   { comments: { [id]: { text, videoId, videoTitle, status, submittedAt, ... } } }
   ```
 - Coordinates deletion detection between popup and content script
+- Opens background tabs for batch comment verification across multiple videos
 
 ### Popup UI ([popup.html](src/popup.html), [popup.js](src/popup.js))
 - Displays all captured comments sorted by date
-- "Check Current Video" button triggers deletion detection
+- "Check Current Video" button triggers deletion detection for current video
+- "Check All Comments" button triggers batch verification across all videos
+- Dark theme support via `prefers-color-scheme` media query
+- Progress indicator for batch operations
 - Visual distinction for deleted comments (red styling)
 - Copy button for each comment
 
 ### Message Flow
+
+**Comment Submission:**
 ```
 Submit comment → content.js → SAVE_COMMENT → background.js → storage
+```
+
+**Check Current Video:**
+```
 Check button → popup.js → CHECK_COMMENTS → background.js → VERIFY_COMMENTS → content.js
                                                         ↓
                                                  Update storage
+                                                        ↓
+                                              Refresh popup display
+```
+
+**Check All Comments (Batch):**
+```
+Check All button → popup.js → CHECK_ALL_COMMENTS → background.js
+                                                        ↓
+                                          For each video with active comments:
+                                            1. Open video in background tab
+                                            2. Wait for page load
+                                            3. VERIFY_COMMENTS → content.js
+                                            4. Update storage
+                                            5. Close tab
                                                         ↓
                                               Refresh popup display
 ```
