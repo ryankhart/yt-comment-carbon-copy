@@ -1,0 +1,142 @@
+// YouTube Comment Monitor - Background Service Worker
+
+// Initialize storage on install
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.local.get('comments', (data) => {
+    if (!data.comments) {
+      chrome.storage.local.set({ comments: {} });
+    }
+  });
+});
+
+// Generate unique ID for comments
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
+}
+
+// Save a new comment to storage
+async function saveComment(payload) {
+  const { comments } = await chrome.storage.local.get('comments');
+
+  const id = generateId();
+  const comment = {
+    id,
+    text: payload.text,
+    videoId: payload.videoId,
+    videoTitle: payload.videoTitle,
+    videoUrl: payload.videoUrl,
+    submittedAt: Date.now(),
+    status: 'active',
+    lastCheckedAt: null,
+    deletedAt: null
+  };
+
+  comments[id] = comment;
+  await chrome.storage.local.set({ comments });
+
+  return id;
+}
+
+// Get all comments from storage
+async function getComments() {
+  const { comments } = await chrome.storage.local.get('comments');
+  return comments || {};
+}
+
+// Update a comment's status
+async function updateCommentStatus(id, status, deletedAt = null) {
+  const { comments } = await chrome.storage.local.get('comments');
+
+  if (comments[id]) {
+    comments[id].status = status;
+    comments[id].lastCheckedAt = Date.now();
+    if (deletedAt) {
+      comments[id].deletedAt = deletedAt;
+    }
+    await chrome.storage.local.set({ comments });
+  }
+}
+
+// Handle checking comments for a specific video
+async function handleCheckComments(videoId) {
+  const comments = await getComments();
+  const toCheck = Object.values(comments)
+    .filter(c => c.videoId === videoId && c.status === 'active');
+
+  if (toCheck.length === 0) {
+    return { success: true, message: 'No comments to check for this video' };
+  }
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    if (!tab?.id) {
+      return { success: false, message: 'Could not access current tab' };
+    }
+
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      action: 'VERIFY_COMMENTS',
+      comments: toCheck
+    });
+
+    if (!response?.results) {
+      return { success: false, message: 'Could not verify comments on page' };
+    }
+
+    // Update storage for deleted comments
+    let deletedCount = 0;
+    for (const result of response.results) {
+      if (!result.found) {
+        await updateCommentStatus(result.id, 'deleted', Date.now());
+        deletedCount++;
+      } else {
+        // Update lastCheckedAt for active comments
+        await updateCommentStatus(result.id, 'active');
+      }
+    }
+
+    return {
+      success: true,
+      message: `Checked ${toCheck.length} comment${toCheck.length !== 1 ? 's' : ''}. ${deletedCount} deleted.`
+    };
+  } catch (error) {
+    console.error('[YT Comment Monitor] Check failed:', error);
+    return { success: false, message: 'Failed to check comments. Make sure you are on a YouTube video page.' };
+  }
+}
+
+// Message handler
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  switch (message.action) {
+    case 'SAVE_COMMENT':
+      saveComment(message.payload)
+        .then(id => sendResponse({ success: true, id }))
+        .catch(error => {
+          console.error('[YT Comment Monitor] Save failed:', error);
+          sendResponse({ success: false, error: error.message });
+        });
+      return true; // Keep channel open for async response
+
+    case 'GET_COMMENTS':
+      getComments()
+        .then(comments => sendResponse({ success: true, comments }))
+        .catch(error => {
+          console.error('[YT Comment Monitor] Get failed:', error);
+          sendResponse({ success: false, error: error.message });
+        });
+      return true;
+
+    case 'CHECK_COMMENTS':
+      handleCheckComments(message.videoId)
+        .then(sendResponse)
+        .catch(error => {
+          console.error('[YT Comment Monitor] Check failed:', error);
+          sendResponse({ success: false, message: error.message });
+        });
+      return true;
+
+    default:
+      sendResponse({ success: false, error: 'Unknown action' });
+      return false;
+  }
+});
