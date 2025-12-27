@@ -43,8 +43,13 @@ function extractVideoMetadata() {
 
 // Handle comment submission
 function handleCommentSubmit(event) {
+  console.log('[YT Comment Monitor] Submit button clicked');
+
   const commentInput = findCommentInput();
+  console.log('[YT Comment Monitor] Comment input element:', commentInput);
+
   const text = commentInput?.innerText?.trim();
+  console.log('[YT Comment Monitor] Comment text:', text);
 
   if (!text) {
     console.warn('[YT Comment Monitor] Could not capture comment text');
@@ -52,6 +57,7 @@ function handleCommentSubmit(event) {
   }
 
   const metadata = extractVideoMetadata();
+  console.log('[YT Comment Monitor] Video metadata:', metadata);
 
   if (!metadata.videoId) {
     console.warn('[YT Comment Monitor] Could not determine video ID');
@@ -114,8 +120,9 @@ const observer = new MutationObserver(() => {
 
   if (submitButton && !processedButtons.has(submitButton)) {
     processedButtons.add(submitButton);
-    submitButton.addEventListener('click', handleCommentSubmit);
-    console.log('[YT Comment Monitor] Submit button listener attached');
+    submitButton.addEventListener('click', handleCommentSubmit, true);
+    console.log('[YT Comment Monitor] Submit button listener attached to:', submitButton);
+    console.log('[YT Comment Monitor] Button HTML:', submitButton.outerHTML.substring(0, 200));
   }
 });
 
@@ -124,6 +131,20 @@ observer.observe(document.body, {
   childList: true,
   subtree: true
 });
+
+// Handle keyboard shortcuts (Ctrl/Cmd+Enter to submit)
+function handleKeyDown(event) {
+  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+    const commentInput = findCommentInput();
+    if (commentInput && document.activeElement === commentInput) {
+      console.log('[YT Comment Monitor] Keyboard shortcut detected');
+      handleCommentSubmit(event);
+    }
+  }
+}
+
+// Listen for keyboard shortcuts (capture phase)
+document.addEventListener('keydown', handleKeyDown, true);
 
 // Listen for verification requests from background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
