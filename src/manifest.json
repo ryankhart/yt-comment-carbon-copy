@@ -1,8 +1,8 @@
 {
     "manifest_version": 3,
-    "name": "YouTube Comment Monitor",
+    "name": "YT Comment Carbon Copy",
     "version": "1.0",
-    "description": "Detect deleted comments on YouTube.",
+    "description": "Backup your YouTube comments and detect when they get deleted.",
     "content_scripts": [
       {
         "matches": ["*://*.youtube.com/*"],

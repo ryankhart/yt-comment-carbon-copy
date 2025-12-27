@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-YouTube Comment Monitor is a Chrome Manifest V3 extension that captures comments you submit on YouTube and detects when they get deleted.
+YT Comment Carbon Copy is a Chrome Manifest V3 extension that captures comments you submit on YouTube and detects when they get deleted.
 
 ## Architecture
 
