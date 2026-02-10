@@ -53,6 +53,31 @@ function findCommentInputForElement(element) {
   return scopedInput || findCommentInput();
 }
 
+function findCommentInputFromEvent(event) {
+  if (!event) return findCommentInput();
+
+  const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+  for (const node of path) {
+    if (node?.isContentEditable) {
+      return node;
+    }
+  }
+
+  const targetElement = event.target;
+  if (targetElement?.isContentEditable) {
+    return targetElement;
+  }
+
+  if (targetElement?.closest) {
+    const scopedInput = targetElement.closest(
+      '#contenteditable-root, [contenteditable="true"]'
+    );
+    if (scopedInput) return scopedInput;
+  }
+
+  return findCommentInputForElement(targetElement || document.activeElement);
+}
+
 function getVideoIdFromUrl(urlString) {
   const url = new URL(urlString);
   const queryId = url.searchParams.get('v');
@@ -364,11 +389,11 @@ observer.observe(document.body, {
 // Handle keyboard shortcuts (Ctrl/Cmd+Enter to submit)
 function handleKeyDown(event) {
   if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-    const commentInput = findCommentInputForElement(document.activeElement);
-    if (commentInput && document.activeElement === commentInput) {
-      console.log('[YT Comment Monitor] Keyboard shortcut detected');
-      captureComment(commentInput);
-    }
+    const commentInput = findCommentInputFromEvent(event);
+    if (!commentInput) return;
+
+    console.log('[YT Comment Monitor] Keyboard shortcut detected');
+    captureComment(commentInput);
   }
 }
 
