@@ -82,6 +82,47 @@ Check All button → popup.js → CHECK_ALL_COMMENTS → background.js
 - **Background script**: `chrome://extensions/` → Click "service worker" link
 - **Popup**: Right-click extension icon → "Inspect popup"
 
+## Icons
+
+### Regenerating Icon Assets
+Icon assets live in `src/icons/` and are generated with ImageMagick (`magick`).
+Small sizes (`16/32/48`) use a pixel-art style; large sizes (`128/512`) use smooth
+vector-style drawing. If you change the design, regenerate all sizes to keep
+consistency with `manifest.json`.
+
+#### Pixel-art icons (16/32/48)
+```bash
+magick -size 16x16 xc:'#d32f2f' \
+  -stroke '#a31515' -strokewidth 1 -fill none -draw "roundrectangle 0,0 15,15 4,4" \
+  -stroke '#b11a1a' -strokewidth 1 -fill '#f0dfdf' -draw "roundrectangle 2,3 10,8 2,2" \
+  -stroke '#b11a1a' -strokewidth 1 -fill '#ffffff' -draw "roundrectangle 4,5 12,10 2,2" \
+  -stroke '#b11a1a' -strokewidth 1 -fill '#ffffff' -draw "polygon 6,10 8,10 5,12" \
+  -stroke none -fill '#f3b3b3' -draw "roundrectangle 5,6 11,6 1,1" \
+  -stroke none -fill '#f3b3b3' -draw "roundrectangle 5,8 9,8 1,1" \
+  src/icons/icon-16.png
+
+magick src/icons/icon-16.png -filter point -resize 32x32 src/icons/icon-32.png
+magick src/icons/icon-16.png -filter point -resize 48x48 src/icons/icon-48.png
+```
+
+#### Smooth icons (128/512)
+```bash
+magick -size 512x512 xc:none \
+  -fill '#d32f2f' -stroke '#a31515' -strokewidth 12 -draw "roundrectangle 8,8 504,504 72,72" \
+  -stroke '#b11a1a' -strokewidth 12 -fill '#f0dfdf' -draw "roundrectangle 72,88 344,288 40,40" \
+  -stroke '#b11a1a' -strokewidth 16 -fill '#ffffff' -draw "roundrectangle 136,152 424,360 48,48" \
+  -stroke '#b11a1a' -strokewidth 16 -fill '#ffffff' -draw "polygon 224,360 280,360 208,432" \
+  -stroke none -fill '#f3b3b3' -draw "roundrectangle 176,208 384,232 16,16" \
+  -stroke none -fill '#f3b3b3' -draw "roundrectangle 176,264 320,288 16,16" \
+  src/icons/icon-512.png
+
+magick src/icons/icon-512.png -alpha set \
+  \( -size 512x512 xc:none -fill white -draw "roundrectangle 0,0 511,511 80,80" \) \
+  -compose DstIn -composite src/icons/icon-512.png
+
+magick src/icons/icon-512.png -filter Lanczos -resize 128x128 src/icons/icon-128.png
+```
+
 ## Code Patterns
 
 ### DOM Selectors (may break if YouTube changes HTML)
