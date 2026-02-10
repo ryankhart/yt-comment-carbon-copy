@@ -18,6 +18,11 @@ chrome.runtime.onStartup?.addListener(() => {
   });
 });
 
+const STATUS_ACTIVE = 'active';
+const STATUS_DELETED = 'deleted';
+const STATUS_ARCHIVED = 'archived';
+const AUTO_ARCHIVE_AFTER_MS = 24 * 60 * 60 * 1000;
+
 // Generate unique ID for comments
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
@@ -36,9 +41,10 @@ async function saveComment(payload) {
     videoTitle: payload.videoTitle,
     videoUrl: payload.videoUrl,
     submittedAt: Date.now(),
-    status: 'active',
+    status: STATUS_ACTIVE,
     lastCheckedAt: null,
     deletedAt: null,
+    archivedAt: null,
     commentId: payload.commentId || null,
     commentUrl: payload.commentUrl || null
   };
@@ -56,19 +62,39 @@ async function getComments() {
 }
 
 // Update a comment's status
-async function updateCommentStatus(id, status, deletedAt = null) {
+async function setCommentStatus(id, { status, deletedAt, archivedAt, updateLastCheckedAt = true } = {}) {
   const { comments } = await chrome.storage.local.get('comments');
 
   if (!comments || !comments[id]) {
-    return;
+    return false;
   }
 
-  comments[id].status = status;
-  comments[id].lastCheckedAt = Date.now();
-  if (deletedAt) {
-    comments[id].deletedAt = deletedAt;
+  const updated = { ...comments[id] };
+  updated.status = status;
+
+  if (updateLastCheckedAt) {
+    updated.lastCheckedAt = Date.now();
   }
+
+  if (status === STATUS_DELETED) {
+    updated.deletedAt = deletedAt ?? Date.now();
+  } else if (deletedAt !== undefined) {
+    updated.deletedAt = deletedAt;
+  } else if (status === STATUS_ACTIVE) {
+    updated.deletedAt = null;
+  }
+
+  if (status === STATUS_ARCHIVED) {
+    updated.archivedAt = archivedAt ?? Date.now();
+  } else if (archivedAt !== undefined) {
+    updated.archivedAt = archivedAt;
+  } else {
+    updated.archivedAt = null;
+  }
+
+  comments[id] = updated;
   await chrome.storage.local.set({ comments });
+  return true;
 }
 
 async function updateCommentMeta({ id, commentId, commentUrl }) {
@@ -89,11 +115,34 @@ async function updateCommentMeta({ id, commentId, commentUrl }) {
   return true;
 }
 
+function shouldAutoArchive(comment, now = Date.now()) {
+  if (!comment?.submittedAt) return false;
+  return now - comment.submittedAt >= AUTO_ARCHIVE_AFTER_MS;
+}
+
+async function unarchiveComment(id) {
+  const { comments } = await chrome.storage.local.get('comments');
+  if (!comments || !comments[id]) {
+    return false;
+  }
+
+  const comment = comments[id];
+  const hasDeletedAt = Boolean(comment.deletedAt);
+  const status = hasDeletedAt ? STATUS_DELETED : STATUS_ACTIVE;
+
+  return setCommentStatus(id, {
+    status,
+    deletedAt: hasDeletedAt ? comment.deletedAt : null,
+    updateLastCheckedAt: false,
+    archivedAt: null
+  });
+}
+
 // Handle checking comments for a specific video
 async function handleCheckComments(videoId) {
   const comments = await getComments();
   const toCheck = Object.values(comments)
-    .filter(c => c.videoId === videoId && c.status === 'active');
+    .filter(c => c.videoId === videoId && c.status === STATUS_ACTIVE);
 
   if (toCheck.length === 0) {
     return { success: true, message: 'No comments to check for this video' };
@@ -108,7 +157,8 @@ async function handleCheckComments(videoId) {
 
     const response = await chrome.tabs.sendMessage(tab.id, {
       action: 'VERIFY_COMMENTS',
-      comments: toCheck
+      comments: toCheck,
+      ensureLoaded: true
     });
 
     if (!response?.results) {
@@ -117,13 +167,33 @@ async function handleCheckComments(videoId) {
 
     // Update storage for deleted comments
     let deletedCount = 0;
+    let archivedCount = 0;
+    const now = Date.now();
+    const byId = new Map(toCheck.map((comment) => [comment.id, comment]));
     for (const result of response.results) {
+      if (result.found === null) {
+        continue;
+      }
       if (!result.found) {
-        await updateCommentStatus(result.id, 'deleted', Date.now());
+        await setCommentStatus(result.id, {
+          status: STATUS_DELETED,
+          deletedAt: now
+        });
         deletedCount++;
       } else {
-        // Update lastCheckedAt for active comments
-        await updateCommentStatus(result.id, 'active');
+        const comment = byId.get(result.id);
+        if (comment && shouldAutoArchive(comment, now)) {
+          await setCommentStatus(result.id, {
+            status: STATUS_ARCHIVED,
+            archivedAt: now
+          });
+          archivedCount++;
+        } else {
+          // Update lastCheckedAt for active comments
+          await setCommentStatus(result.id, {
+            status: STATUS_ACTIVE
+          });
+        }
         if (result.commentId || result.commentUrl) {
           await updateCommentMeta({
             id: result.id,
@@ -134,9 +204,13 @@ async function handleCheckComments(videoId) {
       }
     }
 
+    const archivedSummary = archivedCount
+      ? ` ${archivedCount} archived.`
+      : '';
+
     return {
       success: true,
-      message: `Checked ${toCheck.length} comment${toCheck.length !== 1 ? 's' : ''}. ${deletedCount} deleted.`
+      message: `Checked ${toCheck.length} comment${toCheck.length !== 1 ? 's' : ''}. ${deletedCount} deleted.${archivedSummary}`
     };
   } catch (error) {
     console.error('[YT Comment Carbon Copy] Check failed:', error);
@@ -166,13 +240,33 @@ async function handleCheckAllComments(videoId, comments) {
 
     // Update storage for deleted comments
     let deletedCount = 0;
+    let archivedCount = 0;
+    const now = Date.now();
+    const byId = new Map(comments.map((comment) => [comment.id, comment]));
     if (response?.results) {
       for (const result of response.results) {
+        if (result.found === null) {
+          continue;
+        }
         if (!result.found) {
-          await updateCommentStatus(result.id, 'deleted', Date.now());
+          await setCommentStatus(result.id, {
+            status: STATUS_DELETED,
+            deletedAt: now
+          });
           deletedCount++;
         } else {
-          await updateCommentStatus(result.id, 'active');
+          const comment = byId.get(result.id);
+          if (comment && shouldAutoArchive(comment, now)) {
+            await setCommentStatus(result.id, {
+              status: STATUS_ARCHIVED,
+              archivedAt: now
+            });
+            archivedCount++;
+          } else {
+            await setCommentStatus(result.id, {
+              status: STATUS_ACTIVE
+            });
+          }
           if (result.commentId || result.commentUrl) {
             await updateCommentMeta({
               id: result.id,
@@ -191,6 +285,7 @@ async function handleCheckAllComments(videoId, comments) {
       success: true,
       videoId,
       deletedCount,
+      archivedCount,
       checkedCount: comments.length
     };
   } catch (error) {
@@ -199,7 +294,8 @@ async function handleCheckAllComments(videoId, comments) {
       success: false,
       videoId,
       error: error.message,
-      deletedCount: 0
+      deletedCount: 0,
+      archivedCount: 0
     };
   }
 }
@@ -213,7 +309,8 @@ function waitForContentScript(tabId, comments, timeoutMs = 10000) {
       try {
         const response = await chrome.tabs.sendMessage(tabId, {
           action: 'VERIFY_COMMENTS',
-          comments
+          comments,
+          ensureLoaded: true
         });
 
         if (response?.results) {
@@ -280,6 +377,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .then((updated) => sendResponse({ success: updated }))
         .catch((error) => {
           console.error('[YT Comment Carbon Copy] Update meta failed:', error);
+          sendResponse({ success: false, error: error.message });
+        });
+      return true;
+
+    case 'ARCHIVE_COMMENT':
+      setCommentStatus(message.id, {
+        status: STATUS_ARCHIVED,
+        updateLastCheckedAt: false
+      })
+        .then((updated) => sendResponse({ success: updated }))
+        .catch((error) => {
+          console.error('[YT Comment Carbon Copy] Archive failed:', error);
+          sendResponse({ success: false, error: error.message });
+        });
+      return true;
+
+    case 'UNARCHIVE_COMMENT':
+      unarchiveComment(message.id)
+        .then((updated) => sendResponse({ success: updated }))
+        .catch((error) => {
+          console.error('[YT Comment Carbon Copy] Unarchive failed:', error);
           sendResponse({ success: false, error: error.message });
         });
       return true;

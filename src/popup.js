@@ -2,10 +2,20 @@
 
 document.addEventListener('DOMContentLoaded', init);
 
+const EMPTY_DEFAULT_HTML = 'No comments captured yet.<br>Submit a comment on YouTube to start tracking.';
+const EMPTY_ARCHIVED_HTML = 'No active comments.<br>Use "Show Archived" to view archived items.';
+const STATUS_ACTIVE = 'active';
+const STATUS_DELETED = 'deleted';
+const STATUS_ARCHIVED = 'archived';
+
+let showArchived = false;
+
 async function init() {
+  updateArchivedToggle();
   await loadComments();
   document.getElementById('checkBtn').addEventListener('click', handleCheck);
   document.getElementById('checkAllBtn').addEventListener('click', handleCheckAll);
+  document.getElementById('toggleArchivedBtn').addEventListener('click', toggleArchived);
 }
 
 // Load and display all comments
@@ -31,9 +41,21 @@ async function loadComments() {
 function renderComments(comments) {
   const list = document.getElementById('comment-list');
   const empty = document.getElementById('empty-state');
+  const archivedCount = comments.filter((comment) => getStatus(comment) === STATUS_ARCHIVED).length;
+  const visibleComments = showArchived
+    ? comments
+    : comments.filter((comment) => getStatus(comment) !== STATUS_ARCHIVED);
 
   if (comments.length === 0) {
     list.innerHTML = '';
+    empty.innerHTML = EMPTY_DEFAULT_HTML;
+    empty.classList.remove('hidden');
+    return;
+  }
+
+  if (visibleComments.length === 0) {
+    list.innerHTML = '';
+    empty.innerHTML = archivedCount > 0 ? EMPTY_ARCHIVED_HTML : EMPTY_DEFAULT_HTML;
     empty.classList.remove('hidden');
     return;
   }
@@ -41,7 +63,7 @@ function renderComments(comments) {
   empty.classList.add('hidden');
 
   // Sort by date (newest first)
-  const sorted = comments.sort((a, b) => b.submittedAt - a.submittedAt);
+  const sorted = visibleComments.sort((a, b) => b.submittedAt - a.submittedAt);
 
   list.innerHTML = sorted.map(createCommentCard).join('');
 
@@ -62,20 +84,34 @@ function renderComments(comments) {
       }
     });
   });
+
+  list.querySelectorAll('.archive-btn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      const { id, action } = e.target.dataset;
+      if (!id || !action) return;
+      e.target.disabled = true;
+      await handleArchiveAction(id, action);
+      await loadComments();
+    });
+  });
 }
 
 // Create HTML for a single comment card
 function createCommentCard(comment) {
-  const isDeleted = comment.status === 'deleted';
-  const statusClass = isDeleted ? 'deleted' : 'active';
-  const statusLabel = isDeleted ? 'DELETED' : 'Active';
+  const status = getStatus(comment);
+  const isDeleted = status === STATUS_DELETED;
+  const isArchived = status === STATUS_ARCHIVED;
+  const statusClass = isDeleted ? 'deleted' : isArchived ? 'archived' : 'active';
+  const statusLabel = isDeleted ? 'DELETED' : isArchived ? 'Archived' : 'Active';
 
   const date = new Date(comment.submittedAt).toLocaleDateString();
   const videoTitle = comment.videoTitle || 'Unknown video';
   const targetUrl = getTargetUrl(comment);
+  const archiveAction = isArchived ? 'unarchive' : 'archive';
+  const archiveLabel = isArchived ? 'Unarchive' : 'Archive';
 
   return `
-    <div class="comment-card ${isDeleted ? 'deleted' : ''}">
+    <div class="comment-card ${isDeleted ? 'deleted' : ''} ${isArchived ? 'archived' : ''}">
       <div class="comment-text">${escapeHtml(comment.text)}</div>
       <div class="comment-meta">
         <div class="comment-info">
@@ -85,6 +121,7 @@ function createCommentCard(comment) {
         </div>
         <div class="comment-actions">
           <button class="open-btn" ${targetUrl ? `data-url="${escapeHtml(targetUrl)}"` : 'disabled'}>Open</button>
+          <button class="archive-btn" data-id="${escapeHtml(comment.id)}" data-action="${archiveAction}">${archiveLabel}</button>
           <button class="copy-btn" data-text="${escapeHtml(comment.text)}">Copy</button>
         </div>
       </div>
@@ -130,7 +167,7 @@ async function handleCheckAll() {
     }
 
     const allComments = Object.values(response.comments);
-    const activeComments = allComments.filter(c => c.status === 'active' && c.videoId);
+    const activeComments = allComments.filter((c) => getStatus(c) === STATUS_ACTIVE && c.videoId);
 
     if (activeComments.length === 0) {
       showStatus('No active comments to check', 'success');
@@ -152,6 +189,7 @@ async function handleCheckAll() {
     const totalVideos = videoIds.length;
     let processedVideos = 0;
     let totalDeleted = 0;
+    let totalArchived = 0;
 
     showProgress(`Checking 0/${totalVideos} videos...`, 0);
 
@@ -174,6 +212,9 @@ async function handleCheckAll() {
         if (result?.deletedCount) {
           totalDeleted += result.deletedCount;
         }
+        if (result?.archivedCount) {
+          totalArchived += result.archivedCount;
+        }
       } catch (error) {
         console.error(`Failed to check video ${videoId}:`, error);
       }
@@ -187,7 +228,10 @@ async function handleCheckAll() {
     }
 
     hideProgress();
-    showStatus(`Checked ${activeComments.length} comment${activeComments.length !== 1 ? 's' : ''} across ${totalVideos} video${totalVideos !== 1 ? 's' : ''}. ${totalDeleted} deleted.`, 'success');
+    const archivedSummary = totalArchived
+      ? ` ${totalArchived} archived.`
+      : '';
+    showStatus(`Checked ${activeComments.length} comment${activeComments.length !== 1 ? 's' : ''} across ${totalVideos} video${totalVideos !== 1 ? 's' : ''}. ${totalDeleted} deleted.${archivedSummary}`, 'success');
 
     // Refresh the comment list
     await loadComments();
@@ -254,8 +298,40 @@ function showStatus(message, type) {
   status.className = type || '';
 }
 
+function getStatus(comment) {
+  return comment.status || STATUS_ACTIVE;
+}
+
+function updateArchivedToggle() {
+  const toggleBtn = document.getElementById('toggleArchivedBtn');
+  toggleBtn.textContent = showArchived ? 'Hide Archived' : 'Show Archived';
+}
+
+function toggleArchived() {
+  showArchived = !showArchived;
+  updateArchivedToggle();
+  loadComments();
+}
+
+async function handleArchiveAction(id, action) {
+  const isUnarchive = action === 'unarchive';
+  const response = await new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      { action: isUnarchive ? 'UNARCHIVE_COMMENT' : 'ARCHIVE_COMMENT', id },
+      resolve
+    );
+  });
+
+  if (chrome.runtime.lastError || !response?.success) {
+    showStatus('Failed to update archive state', 'error');
+    return;
+  }
+
+  showStatus(isUnarchive ? 'Comment restored' : 'Comment archived', 'success');
+}
+
 function getTargetUrl(comment) {
-  if (comment.status !== 'deleted' && comment.commentUrl) {
+  if (getStatus(comment) !== STATUS_DELETED && comment.commentUrl) {
     return comment.commentUrl;
   }
 

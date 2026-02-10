@@ -11,6 +11,10 @@ function normalizeText(value) {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // DOM helper: Find submit button with fallbacks
 function findSubmitButtons() {
   const selectors = [
@@ -197,6 +201,33 @@ function findMatchingCommentElements(text) {
   return elements.filter((el) => normalizeText(el.textContent) === normalized);
 }
 
+function getCommentsContainer() {
+  return document.querySelector('ytd-comments') || document.querySelector('#comments');
+}
+
+async function waitForCommentsToLoad(timeoutMs = 15000) {
+  const start = Date.now();
+  let attempts = 0;
+
+  while (Date.now() - start < timeoutMs) {
+    const visibleCount = document.querySelectorAll('#content-text').length;
+    if (visibleCount > 0) {
+      return true;
+    }
+
+    const commentsContainer = getCommentsContainer();
+    if (commentsContainer) {
+      commentsContainer.scrollIntoView({ block: 'start' });
+    }
+
+    window.scrollBy(0, window.innerHeight * 0.85);
+    attempts += 1;
+    await sleep(800);
+  }
+
+  return document.querySelectorAll('#content-text').length > 0;
+}
+
 // Extract video metadata from the current page
 function extractVideoMetadata() {
   const videoId = getVideoIdFromUrl(window.location.href);
@@ -290,48 +321,67 @@ function handleCommentSubmit(event) {
 // Verify if comments exist on the page
 function buildVisibleCommentIndex(metadata) {
   const visibleCommentElements = document.querySelectorAll('#content-text');
-  const index = new Map();
+  const byText = new Map();
+  const byId = new Map();
 
   visibleCommentElements.forEach((el) => {
     const normalized = normalizeText(el.textContent);
     if (!normalized) return;
     const meta = extractCommentMetaFromElement(el, metadata);
 
-    if (!index.has(normalized)) {
-      index.set(normalized, []);
+    if (!byText.has(normalized)) {
+      byText.set(normalized, []);
     }
-    index.get(normalized).push(meta);
+    byText.get(normalized).push(meta);
+
+    if (meta.commentId && !byId.has(meta.commentId)) {
+      byId.set(meta.commentId, meta);
+    }
   });
 
-  return index;
+  return { byText, byId };
 }
 
 // Verify if comments exist on the page
-function verifyComments(commentsToCheck) {
-  // Get all visible comment texts on the page
-  const metadata = extractVideoMetadata();
-  const visibleIndex = buildVisibleCommentIndex(metadata);
+async function verifyComments(commentsToCheck, ensureLoaded = false) {
+  if (ensureLoaded || document.querySelectorAll('#content-text').length === 0) {
+    await waitForCommentsToLoad();
+  }
 
-  // Check if comments section is loaded
-  const commentsLoaded = document.querySelector('ytd-comments');
-  if (!commentsLoaded) {
-    // Can't determine - comments section not loaded
+  const metadata = extractVideoMetadata();
+  const { byText, byId } = buildVisibleCommentIndex(metadata);
+  const commentsLoaded = getCommentsContainer();
+
+  if (byText.size === 0 && byId.size === 0) {
+    const reason = commentsLoaded ? 'comments_empty' : 'comments_not_loaded';
     return commentsToCheck.map((comment) => ({
       id: comment.id,
-      found: true, // Assume found if we can't check
-      reason: 'comments_not_loaded'
+      found: null,
+      reason
     }));
   }
 
   return commentsToCheck.map((comment) => {
+    if (comment.commentId) {
+      const match = byId.get(comment.commentId);
+      return {
+        id: comment.id,
+        found: Boolean(match),
+        commentId: match?.commentId || comment.commentId || null,
+        commentUrl: match?.commentUrl || comment.commentUrl || null
+      };
+    }
+
     const normalized = normalizeText(comment.text);
-    const matches = visibleIndex.get(normalized) || [];
+    const matches = byText.get(normalized) || [];
     const preferredMeta = matches.find((match) => match.commentId) || matches[0];
+    const unambiguous = matches.length === 1;
+
     return {
       id: comment.id,
       found: matches.length > 0,
-      commentId: preferredMeta?.commentId || null,
-      commentUrl: preferredMeta?.commentUrl || null
+      commentId: unambiguous ? preferredMeta?.commentId || null : null,
+      commentUrl: unambiguous ? preferredMeta?.commentUrl || null : null
     };
   });
 }
@@ -403,10 +453,15 @@ document.addEventListener('keydown', handleKeyDown, true);
 // Listen for verification requests from background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'VERIFY_COMMENTS') {
-    const results = verifyComments(message.comments);
-    sendResponse({ results });
+    verifyComments(message.comments, message.ensureLoaded)
+      .then((results) => sendResponse({ results }))
+      .catch((error) => {
+        console.error('[YT Comment Monitor] Verify failed:', error);
+        sendResponse({ results: [], error: error.message });
+      });
+    return true;
   }
-  return true; // Keep channel open
+  return false;
 });
 
 console.log('[YT Comment Monitor] Content script loaded');

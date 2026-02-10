@@ -12,6 +12,7 @@
       --bg-secondary: #f5f5f5;
       --bg-card: #ffffff;
       --bg-card-deleted: #fdf2f2;
+      --bg-card-archived: #f5f7fb;
       --bg-button: #f5f5f5;
       --bg-button-hover: #e5e5e5;
       --bg-status-error: #fdf2f2;
@@ -24,9 +25,11 @@
       --text-success: #008800;
       --text-deleted: #e74c3c;
       --text-active: #27ae60;
+      --text-archived: #6b7280;
 
       --border-primary: #dddddd;
       --border-deleted: #e74c3c;
+      --border-archived: #cbd5e1;
 
       --btn-primary-bg: #cc0000;
       --btn-primary-hover: #aa0000;
@@ -40,6 +43,7 @@
         --bg-secondary: #2a2a2a;
         --bg-card: #252525;
         --bg-card-deleted: #3a2020;
+        --bg-card-archived: #202733;
         --bg-button: #2a2a2a;
         --bg-button-hover: #3a3a3a;
         --bg-status-error: #3a2020;
@@ -52,9 +56,11 @@
         --text-success: #44ff44;
         --text-deleted: #ff6b6b;
         --text-active: #4ade80;
+        --text-archived: #9ca3af;
 
         --border-primary: #404040;
         --border-deleted: #ff6b6b;
+        --border-archived: #64748b;
 
         --btn-primary-bg: #cc0000;
         --btn-primary-hover: #ee0000;
@@ -134,6 +140,27 @@
       cursor: not-allowed;
     }
 
+    #filters {
+      margin-bottom: 12px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    #filters button {
+      padding: 6px 12px;
+      background: var(--bg-button);
+      color: var(--text-primary);
+      border: 1px solid var(--border-primary);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    #filters button:hover {
+      background: var(--bg-button-hover);
+    }
+
     #progress {
       padding: 8px;
       margin-bottom: 12px;
@@ -179,6 +206,11 @@
     .comment-card.deleted {
       border-color: var(--border-deleted);
       background: var(--bg-card-deleted);
+    }
+
+    .comment-card.archived {
+      border-color: var(--border-archived);
+      background: var(--bg-card-archived);
     }
 
     .comment-text {
@@ -229,8 +261,13 @@
       color: var(--text-active);
     }
 
+    .status-badge.archived {
+      color: var(--text-archived);
+    }
+
     .copy-btn,
-    .open-btn {
+    .open-btn,
+    .archive-btn {
       padding: 4px 8px;
       font-size: 11px;
       background: var(--bg-button);
@@ -241,7 +278,8 @@
     }
 
     .copy-btn:hover,
-    .open-btn:hover {
+    .open-btn:hover,
+    .archive-btn:hover {
       background: var(--bg-button-hover);
     }
 
@@ -278,6 +316,10 @@
   <div id="controls">
     <button id="checkBtn">Check Current Video</button>
     <button id="checkAllBtn">Check All Comments</button>
+  </div>
+
+  <div id="filters">
+    <button id="toggleArchivedBtn">Show Archived</button>
   </div>
 
   <div id="comment-list"></div>
