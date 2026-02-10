@@ -87,35 +87,81 @@ function buildCommentUrl(videoId, commentId, videoUrl) {
   }
 }
 
-function extractCommentIdFromElement(element) {
-  if (!element) return null;
+function getCommentIdFromUrl(urlString) {
+  if (!urlString) return null;
+  try {
+    const url = new URL(urlString, window.location.origin);
+    return url.searchParams.get('lc');
+  } catch {
+    return null;
+  }
+}
 
-  const candidates = [
-    element.closest('ytd-comment-renderer'),
-    element.closest('ytd-comment-thread-renderer')
+function extractCommentMetaFromElement(element, metadata) {
+  if (!element) return { commentId: null, commentUrl: null };
+
+  const candidate =
+    element.closest('ytd-comment-renderer, ytd-comment-thread-renderer') || element;
+
+  let commentId = null;
+  let commentUrl = null;
+
+  const directAttributes = [
+    'comment-id',
+    'data-comment-id',
+    'data-commentid',
+    'data-cid',
+    'data-id',
+    'cid'
   ];
 
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-
-    const directAttributes = ['comment-id', 'data-comment-id', 'data-id'];
-    for (const attr of directAttributes) {
-      const value = candidate.getAttribute(attr);
-      if (value) return value;
-    }
-
-    if (candidate.dataset?.commentId) return candidate.dataset.commentId;
-    if (candidate.dataset?.id) return candidate.dataset.id;
-
-    const attributeNames = candidate.getAttributeNames?.() || [];
-    const dynamicAttribute = attributeNames.find((name) => name.includes('comment-id'));
-    if (dynamicAttribute) {
-      const value = candidate.getAttribute(dynamicAttribute);
-      if (value) return value;
+  for (const attr of directAttributes) {
+    const value = candidate.getAttribute?.(attr);
+    if (value) {
+      commentId = value;
+      break;
     }
   }
 
-  return null;
+  if (!commentId) {
+    if (candidate.dataset?.commentId) commentId = candidate.dataset.commentId;
+    if (!commentId && candidate.dataset?.commentid) commentId = candidate.dataset.commentid;
+    if (!commentId && candidate.dataset?.cid) commentId = candidate.dataset.cid;
+    if (!commentId && candidate.dataset?.id) commentId = candidate.dataset.id;
+  }
+
+  if (!commentId) {
+    const candidateId = candidate.getAttribute?.('id');
+    if (candidateId?.startsWith('comment-')) {
+      commentId = candidateId.slice('comment-'.length);
+    }
+  }
+
+  if (!commentId && candidate.getAttributeNames) {
+    const attributeNames = candidate.getAttributeNames();
+    const dynamicAttribute = attributeNames.find((name) =>
+      name.includes('comment-id')
+    );
+    if (dynamicAttribute) {
+      commentId = candidate.getAttribute(dynamicAttribute);
+    }
+  }
+
+  const anchor = candidate.querySelector?.('a[href*="lc="]');
+  if (anchor) {
+    const anchorUrl = new URL(anchor.getAttribute('href'), window.location.origin);
+    const anchorCommentId = getCommentIdFromUrl(anchorUrl.toString());
+    if (anchorCommentId) {
+      commentId = commentId || anchorCommentId;
+      commentUrl = anchorUrl.toString();
+    }
+  }
+
+  if (commentId && !commentUrl) {
+    commentUrl = buildCommentUrl(metadata.videoId, commentId, metadata.videoUrl);
+  }
+
+  return { commentId, commentUrl };
 }
 
 function findMatchingCommentElements(text) {
@@ -217,12 +263,29 @@ function handleCommentSubmit(event) {
 }
 
 // Verify if comments exist on the page
+function buildVisibleCommentIndex(metadata) {
+  const visibleCommentElements = document.querySelectorAll('#content-text');
+  const index = new Map();
+
+  visibleCommentElements.forEach((el) => {
+    const normalized = normalizeText(el.textContent);
+    if (!normalized) return;
+    const meta = extractCommentMetaFromElement(el, metadata);
+
+    if (!index.has(normalized)) {
+      index.set(normalized, []);
+    }
+    index.get(normalized).push(meta);
+  });
+
+  return index;
+}
+
+// Verify if comments exist on the page
 function verifyComments(commentsToCheck) {
   // Get all visible comment texts on the page
-  const visibleCommentElements = document.querySelectorAll('#content-text');
-  const visibleComments = new Set(
-    Array.from(visibleCommentElements).map((el) => normalizeText(el.textContent))
-  );
+  const metadata = extractVideoMetadata();
+  const visibleIndex = buildVisibleCommentIndex(metadata);
 
   // Check if comments section is loaded
   const commentsLoaded = document.querySelector('ytd-comments');
@@ -235,10 +298,17 @@ function verifyComments(commentsToCheck) {
     }));
   }
 
-  return commentsToCheck.map((comment) => ({
-    id: comment.id,
-    found: visibleComments.has(normalizeText(comment.text))
-  }));
+  return commentsToCheck.map((comment) => {
+    const normalized = normalizeText(comment.text);
+    const matches = visibleIndex.get(normalized) || [];
+    const preferredMeta = matches.find((match) => match.commentId) || matches[0];
+    return {
+      id: comment.id,
+      found: matches.length > 0,
+      commentId: preferredMeta?.commentId || null,
+      commentUrl: preferredMeta?.commentUrl || null
+    };
+  });
 }
 
 function scheduleCommentLinkResolve({ localId, normalizedText, metadata }) {
@@ -249,15 +319,14 @@ function scheduleCommentLinkResolve({ localId, normalizedText, metadata }) {
   const attempt = () => {
     const matches = findMatchingCommentElements(normalizedText);
     for (const match of matches) {
-      const commentId = extractCommentIdFromElement(match);
-      if (commentId) {
-        const commentUrl = buildCommentUrl(metadata.videoId, commentId, metadata.videoUrl);
+      const meta = extractCommentMetaFromElement(match, metadata);
+      if (meta.commentId) {
         chrome.runtime.sendMessage({
           action: 'UPDATE_COMMENT_META',
           payload: {
             id: localId,
-            commentId,
-            commentUrl
+            commentId: meta.commentId,
+            commentUrl: meta.commentUrl
           }
         });
         return;

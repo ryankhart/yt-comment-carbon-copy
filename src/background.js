@@ -124,6 +124,13 @@ async function handleCheckComments(videoId) {
       } else {
         // Update lastCheckedAt for active comments
         await updateCommentStatus(result.id, 'active');
+        if (result.commentId || result.commentUrl) {
+          await updateCommentMeta({
+            id: result.id,
+            commentId: result.commentId,
+            commentUrl: result.commentUrl
+          });
+        }
       }
     }
 
@@ -166,6 +173,13 @@ async function handleCheckAllComments(videoId, comments) {
           deletedCount++;
         } else {
           await updateCommentStatus(result.id, 'active');
+          if (result.commentId || result.commentUrl) {
+            await updateCommentMeta({
+              id: result.id,
+              commentId: result.commentId,
+              commentUrl: result.commentUrl
+            });
+          }
         }
       }
     }
