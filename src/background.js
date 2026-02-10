@@ -9,6 +9,15 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
+// Ensure storage exists even if onInstalled did not run (e.g., reload)
+chrome.runtime.onStartup?.addListener(() => {
+  chrome.storage.local.get('comments', (data) => {
+    if (!data.comments) {
+      chrome.storage.local.set({ comments: {} });
+    }
+  });
+});
+
 // Generate unique ID for comments
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
@@ -17,6 +26,7 @@ function generateId() {
 // Save a new comment to storage
 async function saveComment(payload) {
   const { comments } = await chrome.storage.local.get('comments');
+  const nextComments = comments || {};
 
   const id = generateId();
   const comment = {
@@ -28,11 +38,13 @@ async function saveComment(payload) {
     submittedAt: Date.now(),
     status: 'active',
     lastCheckedAt: null,
-    deletedAt: null
+    deletedAt: null,
+    commentId: payload.commentId || null,
+    commentUrl: payload.commentUrl || null
   };
 
-  comments[id] = comment;
-  await chrome.storage.local.set({ comments });
+  nextComments[id] = comment;
+  await chrome.storage.local.set({ comments: nextComments });
 
   return id;
 }
@@ -47,14 +59,34 @@ async function getComments() {
 async function updateCommentStatus(id, status, deletedAt = null) {
   const { comments } = await chrome.storage.local.get('comments');
 
-  if (comments[id]) {
-    comments[id].status = status;
-    comments[id].lastCheckedAt = Date.now();
-    if (deletedAt) {
-      comments[id].deletedAt = deletedAt;
-    }
-    await chrome.storage.local.set({ comments });
+  if (!comments || !comments[id]) {
+    return;
   }
+
+  comments[id].status = status;
+  comments[id].lastCheckedAt = Date.now();
+  if (deletedAt) {
+    comments[id].deletedAt = deletedAt;
+  }
+  await chrome.storage.local.set({ comments });
+}
+
+async function updateCommentMeta({ id, commentId, commentUrl }) {
+  const { comments } = await chrome.storage.local.get('comments');
+  if (!comments || !comments[id]) {
+    return false;
+  }
+
+  if (commentId) {
+    comments[id].commentId = commentId;
+  }
+
+  if (commentUrl) {
+    comments[id].commentUrl = commentUrl;
+  }
+
+  await chrome.storage.local.set({ comments });
+  return true;
 }
 
 // Handle checking comments for a specific video
@@ -107,6 +139,10 @@ async function handleCheckComments(videoId) {
 
 // Handle checking all comments for a video by opening it in a background tab
 async function handleCheckAllComments(videoId, comments) {
+  if (!comments || comments.length === 0) {
+    return { success: true, videoId, deletedCount: 0, checkedCount: 0 };
+  }
+
   try {
     // Open the video in a new tab (in background)
     const tab = await chrome.tabs.create({
@@ -114,14 +150,12 @@ async function handleCheckAllComments(videoId, comments) {
       active: false
     });
 
-    // Wait for the tab to load and comments section to be ready
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    // Send verification request to the content script
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      action: 'VERIFY_COMMENTS',
-      comments: comments
-    });
+    let response = null;
+    try {
+      response = await waitForContentScript(tab.id, comments, 10000);
+    } catch (error) {
+      response = null;
+    }
 
     // Update storage for deleted comments
     let deletedCount = 0;
@@ -154,6 +188,38 @@ async function handleCheckAllComments(videoId, comments) {
       deletedCount: 0
     };
   }
+}
+
+function waitForContentScript(tabId, comments, timeoutMs = 10000) {
+  const intervalMs = 800;
+  const start = Date.now();
+
+  return new Promise((resolve, reject) => {
+    const attempt = async () => {
+      try {
+        const response = await chrome.tabs.sendMessage(tabId, {
+          action: 'VERIFY_COMMENTS',
+          comments
+        });
+
+        if (response?.results) {
+          resolve(response);
+          return;
+        }
+      } catch (error) {
+        // Swallow errors while content script loads
+      }
+
+      if (Date.now() - start >= timeoutMs) {
+        reject(new Error('Timed out waiting for content script'));
+        return;
+      }
+
+      setTimeout(attempt, intervalMs);
+    };
+
+    attempt();
+  });
 }
 
 // Message handler
@@ -191,6 +257,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .then(sendResponse)
         .catch(error => {
           console.error('[YT Comment Carbon Copy] Batch check failed:', error);
+          sendResponse({ success: false, error: error.message });
+        });
+      return true;
+
+    case 'UPDATE_COMMENT_META':
+      updateCommentMeta(message.payload)
+        .then((updated) => sendResponse({ success: updated }))
+        .catch((error) => {
+          console.error('[YT Comment Carbon Copy] Update meta failed:', error);
           sendResponse({ success: false, error: error.message });
         });
       return true;

@@ -52,6 +52,16 @@ function renderComments(comments) {
       copyToClipboard(text, e.target);
     });
   });
+
+  // Attach open button handlers
+  list.querySelectorAll('.open-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      const url = e.target.dataset.url;
+      if (url) {
+        openInNewTab(url);
+      }
+    });
+  });
 }
 
 // Create HTML for a single comment card
@@ -62,6 +72,7 @@ function createCommentCard(comment) {
 
   const date = new Date(comment.submittedAt).toLocaleDateString();
   const videoTitle = comment.videoTitle || 'Unknown video';
+  const targetUrl = getTargetUrl(comment);
 
   return `
     <div class="comment-card ${isDeleted ? 'deleted' : ''}">
@@ -72,7 +83,10 @@ function createCommentCard(comment) {
           <span>${date}</span>
           <span class="status-badge ${statusClass}">${statusLabel}</span>
         </div>
-        <button class="copy-btn" data-text="${escapeHtml(comment.text)}">Copy</button>
+        <div class="comment-actions">
+          <button class="open-btn" ${targetUrl ? `data-url="${escapeHtml(targetUrl)}"` : 'disabled'}>Open</button>
+          <button class="copy-btn" data-text="${escapeHtml(comment.text)}">Copy</button>
+        </div>
       </div>
     </div>
   `;
@@ -116,7 +130,7 @@ async function handleCheckAll() {
     }
 
     const allComments = Object.values(response.comments);
-    const activeComments = allComments.filter(c => c.status === 'active');
+    const activeComments = allComments.filter(c => c.status === 'active' && c.videoId);
 
     if (activeComments.length === 0) {
       showStatus('No active comments to check', 'success');
@@ -203,8 +217,7 @@ async function handleCheck() {
 
     let videoId;
     try {
-      const url = new URL(tab.url);
-      videoId = url.searchParams.get('v');
+      videoId = getVideoIdFromUrl(tab.url);
     } catch {
       videoId = null;
     }
@@ -241,6 +254,26 @@ function showStatus(message, type) {
   status.className = type || '';
 }
 
+function getTargetUrl(comment) {
+  if (comment.status !== 'deleted' && comment.commentUrl) {
+    return comment.commentUrl;
+  }
+
+  if (comment.videoUrl) {
+    return comment.videoUrl;
+  }
+
+  if (comment.videoId) {
+    return `https://www.youtube.com/watch?v=${comment.videoId}`;
+  }
+
+  return null;
+}
+
+function openInNewTab(url) {
+  chrome.tabs.create({ url });
+}
+
 // Copy text to clipboard
 async function copyToClipboard(text, button) {
   try {
@@ -262,4 +295,23 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str;
   return div.innerHTML;
+}
+
+function getVideoIdFromUrl(urlString) {
+  const url = new URL(urlString);
+  const queryId = url.searchParams.get('v');
+  if (queryId) return queryId;
+
+  const parts = url.pathname.split('/').filter(Boolean);
+  const shortsIndex = parts.indexOf('shorts');
+  if (shortsIndex !== -1 && parts[shortsIndex + 1]) {
+    return parts[shortsIndex + 1];
+  }
+
+  const liveIndex = parts.indexOf('live');
+  if (liveIndex !== -1 && parts[liveIndex + 1]) {
+    return parts[liveIndex + 1];
+  }
+
+  return null;
 }
