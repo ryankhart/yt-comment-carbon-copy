@@ -193,6 +193,11 @@ function extractCommentMetaFromElement(element, metadata) {
   return { commentId, commentUrl };
 }
 
+function getStoredCommentId(comment) {
+  if (!comment) return null;
+  return comment.commentId || getCommentIdFromUrl(comment.commentUrl);
+}
+
 function findMatchingCommentElements(text) {
   const normalized = normalizeText(text);
   if (!normalized) return [];
@@ -361,28 +366,73 @@ async function verifyComments(commentsToCheck, ensureLoaded = false) {
     }));
   }
 
-  return commentsToCheck.map((comment) => {
-    if (comment.commentId) {
-      const match = byId.get(comment.commentId);
-      return {
-        id: comment.id,
-        found: Boolean(match),
-        commentId: match?.commentId || comment.commentId || null,
-        commentUrl: match?.commentUrl || comment.commentUrl || null
-      };
+  const results = new Map();
+  const unresolvedForTextFallback = [];
+  const claimedVisibleIds = new Set();
+
+  // Pass 1: ID-first matching. Only comments without any stored ID flow into text fallback.
+  for (const comment of commentsToCheck) {
+    const storedCommentId = getStoredCommentId(comment);
+    if (!storedCommentId) {
+      unresolvedForTextFallback.push(comment);
+      continue;
     }
 
-    const normalized = normalizeText(comment.text);
-    const matches = byText.get(normalized) || [];
-    const preferredMeta = matches.find((match) => match.commentId) || matches[0];
-    const unambiguous = matches.length === 1;
+    const match = byId.get(storedCommentId);
+    if (match?.commentId) {
+      claimedVisibleIds.add(match.commentId);
+    }
 
-    return {
+    results.set(comment.id, {
       id: comment.id,
-      found: matches.length > 0,
-      commentId: unambiguous ? preferredMeta?.commentId || null : null,
-      commentUrl: unambiguous ? preferredMeta?.commentUrl || null : null
-    };
+      found: Boolean(match),
+      commentId: match?.commentId || storedCommentId,
+      commentUrl: match?.commentUrl || comment.commentUrl || null
+    });
+  }
+
+  const fallbackGroups = new Map();
+  unresolvedForTextFallback.forEach((comment) => {
+    const key = normalizeText(comment.text);
+    if (!fallbackGroups.has(key)) {
+      fallbackGroups.set(key, []);
+    }
+    fallbackGroups.get(key).push(comment);
+  });
+
+  // Pass 2: text fallback only for comments that still have no ID.
+  for (const [normalizedText, pendingComments] of fallbackGroups.entries()) {
+    const matches = byText.get(normalizedText) || [];
+    const unclaimedIdMatches = matches.filter(
+      (match) => match.commentId && !claimedVisibleIds.has(match.commentId)
+    );
+
+    pendingComments.forEach((comment) => {
+      let matchMeta = null;
+      if (matches.length === 1) {
+        matchMeta = matches[0];
+      } else if (pendingComments.length === 1 && unclaimedIdMatches.length === 1) {
+        matchMeta = unclaimedIdMatches[0];
+      }
+
+      if (matchMeta?.commentId) {
+        claimedVisibleIds.add(matchMeta.commentId);
+      }
+
+      results.set(comment.id, {
+        id: comment.id,
+        found: matches.length > 0,
+        commentId: matchMeta?.commentId || null,
+        commentUrl: matchMeta?.commentUrl || null
+      });
+    });
+  }
+
+  return commentsToCheck.map((comment) => results.get(comment.id) || {
+    id: comment.id,
+    found: false,
+    commentId: null,
+    commentUrl: null
   });
 }
 
