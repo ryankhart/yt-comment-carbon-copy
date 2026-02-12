@@ -17,12 +17,14 @@
       --bg-button-hover: #e5e5e5;
       --bg-status-error: #fdf2f2;
       --bg-status-success: #f0fdf0;
+      --bg-notice: #eff6ff;
 
       --text-primary: #333333;
       --text-secondary: #666666;
       --text-accent: #cc0000;
       --text-error: #cc0000;
       --text-success: #008800;
+      --text-notice: #1d4ed8;
       --text-deleted: #e74c3c;
       --text-active: #27ae60;
       --text-archived: #6b7280;
@@ -30,6 +32,7 @@
       --border-primary: #dddddd;
       --border-deleted: #e74c3c;
       --border-archived: #cbd5e1;
+      --border-notice: #bfdbfe;
 
       --btn-primary-bg: #cc0000;
       --btn-primary-hover: #aa0000;
@@ -48,12 +51,14 @@
         --bg-button-hover: #3a3a3a;
         --bg-status-error: #3a2020;
         --bg-status-success: #1a3a1a;
+        --bg-notice: #1e293b;
 
         --text-primary: #e0e0e0;
         --text-secondary: #a0a0a0;
         --text-accent: #ff4444;
         --text-error: #ff4444;
         --text-success: #44ff44;
+        --text-notice: #93c5fd;
         --text-deleted: #ff6b6b;
         --text-active: #4ade80;
         --text-archived: #9ca3af;
@@ -61,6 +66,7 @@
         --border-primary: #404040;
         --border-deleted: #ff6b6b;
         --border-archived: #64748b;
+        --border-notice: #334155;
 
         --btn-primary-bg: #cc0000;
         --btn-primary-hover: #ee0000;
@@ -110,6 +116,36 @@
     #status.success {
       background: var(--bg-status-success);
       color: var(--text-success);
+    }
+
+    #auto-archive-notice {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px;
+      margin-bottom: 12px;
+      border-radius: 4px;
+      background: var(--bg-notice);
+      border: 1px solid var(--border-notice);
+      color: var(--text-notice);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    #auto-archive-notice.hidden {
+      display: none;
+    }
+
+    #dismiss-auto-archive-notice {
+      border: none;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      padding: 0;
+      flex-shrink: 0;
     }
 
     #controls {
@@ -305,6 +341,10 @@
   <h2>YT Comment Carbon Copy</h2>
 
   <div id="status"></div>
+  <div id="auto-archive-notice" class="hidden">
+    <span id="auto-archive-notice-text"></span>
+    <button id="dismiss-auto-archive-notice" aria-label="Dismiss notice">x</button>
+  </div>
 
   <div id="progress">
     <div id="progress-text">Checking comments...</div>

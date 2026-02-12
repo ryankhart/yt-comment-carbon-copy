@@ -145,7 +145,13 @@ async function handleCheckComments(videoId) {
     .filter(c => c.videoId === videoId && c.status === STATUS_ACTIVE);
 
   if (toCheck.length === 0) {
-    return { success: true, message: 'No comments to check for this video' };
+    return {
+      success: true,
+      message: 'No comments to check for this video',
+      checkedCount: 0,
+      deletedCount: 0,
+      archivedCount: 0
+    };
   }
 
   try {
@@ -210,7 +216,10 @@ async function handleCheckComments(videoId) {
 
     return {
       success: true,
-      message: `Checked ${toCheck.length} comment${toCheck.length !== 1 ? 's' : ''}. ${deletedCount} deleted.${archivedSummary}`
+      message: `Checked ${toCheck.length} comment${toCheck.length !== 1 ? 's' : ''}. ${deletedCount} deleted.${archivedSummary}`,
+      checkedCount: toCheck.length,
+      deletedCount,
+      archivedCount
     };
   } catch (error) {
     console.error('[YT Comment Carbon Copy] Check failed:', error);

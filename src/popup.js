@@ -7,11 +7,14 @@ const EMPTY_ARCHIVED_HTML = 'No active comments.<br>Use "Show Archived" to view 
 const STATUS_ACTIVE = 'active';
 const STATUS_DELETED = 'deleted';
 const STATUS_ARCHIVED = 'archived';
+const AUTO_ARCHIVE_NOTICE_KEY = 'autoArchiveNotice';
 
 let showArchived = false;
 
 async function init() {
   updateArchivedToggle();
+  bindAutoArchiveNoticeDismiss();
+  await renderStoredAutoArchiveNotice();
   await loadComments();
   document.getElementById('checkBtn').addEventListener('click', handleCheck);
   document.getElementById('checkAllBtn').addEventListener('click', handleCheckAll);
@@ -232,6 +235,7 @@ async function handleCheckAll() {
       ? ` ${totalArchived} archived.`
       : '';
     showStatus(`Checked ${activeComments.length} comment${activeComments.length !== 1 ? 's' : ''} across ${totalVideos} video${totalVideos !== 1 ? 's' : ''}. ${totalDeleted} deleted.${archivedSummary}`, 'success');
+    await handleAutoArchiveNotice(totalArchived);
 
     // Refresh the comment list
     await loadComments();
@@ -277,6 +281,7 @@ async function handleCheck() {
         showStatus('Check failed: ' + chrome.runtime.lastError.message, 'error');
       } else if (response?.success) {
         showStatus(response.message, 'success');
+        await handleAutoArchiveNotice(response.archivedCount || 0);
       } else {
         showStatus(response?.message || 'Check failed', 'error');
       }
@@ -305,6 +310,49 @@ function getStatus(comment) {
 function updateArchivedToggle() {
   const toggleBtn = document.getElementById('toggleArchivedBtn');
   toggleBtn.textContent = showArchived ? 'Hide Archived' : 'Show Archived';
+}
+
+function bindAutoArchiveNoticeDismiss() {
+  const dismissButton = document.getElementById('dismiss-auto-archive-notice');
+  dismissButton.addEventListener('click', async () => {
+    hideAutoArchiveNotice();
+    await chrome.storage.local.remove(AUTO_ARCHIVE_NOTICE_KEY);
+  });
+}
+
+async function renderStoredAutoArchiveNotice() {
+  const data = await chrome.storage.local.get(AUTO_ARCHIVE_NOTICE_KEY);
+  const count = data?.[AUTO_ARCHIVE_NOTICE_KEY]?.count || 0;
+  if (count > 0) {
+    showAutoArchiveNotice(count);
+  } else {
+    hideAutoArchiveNotice();
+  }
+}
+
+async function handleAutoArchiveNotice(count) {
+  if (!count) {
+    return;
+  }
+
+  const notice = {
+    count,
+    createdAt: Date.now()
+  };
+  await chrome.storage.local.set({ [AUTO_ARCHIVE_NOTICE_KEY]: notice });
+  showAutoArchiveNotice(count);
+}
+
+function showAutoArchiveNotice(count) {
+  const notice = document.getElementById('auto-archive-notice');
+  const text = document.getElementById('auto-archive-notice-text');
+  text.textContent = `${count} comment${count !== 1 ? 's were' : ' was'} auto-archived after 24 hours to keep your active feed clean.`;
+  notice.classList.remove('hidden');
+}
+
+function hideAutoArchiveNotice() {
+  const notice = document.getElementById('auto-archive-notice');
+  notice.classList.add('hidden');
 }
 
 function toggleArchived() {
