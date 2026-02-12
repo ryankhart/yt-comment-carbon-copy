@@ -11,6 +11,15 @@ function normalizeText(value) {
   return value.replace(/\s+/g, ' ').trim();
 }
 
+function shouldSkipDuplicateCapture(lastCaptureEntry, videoId, normalizedText, now, windowMs) {
+  if (!lastCaptureEntry) return false;
+  return (
+    lastCaptureEntry.videoId === videoId &&
+    lastCaptureEntry.text === normalizedText &&
+    now - lastCaptureEntry.at < windowMs
+  );
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -277,12 +286,7 @@ function captureComment(sourceElement) {
   }
 
   const now = Date.now();
-  if (
-    lastCapture &&
-    lastCapture.videoId === metadata.videoId &&
-    lastCapture.text === normalizedText &&
-    now - lastCapture.at < LAST_CAPTURE_WINDOW_MS
-  ) {
+  if (shouldSkipDuplicateCapture(lastCapture, metadata.videoId, normalizedText, now, LAST_CAPTURE_WINDOW_MS)) {
     console.log('[YT Comment Monitor] Skipping duplicate capture');
     return;
   }
@@ -366,6 +370,10 @@ async function verifyComments(commentsToCheck, ensureLoaded = false) {
     }));
   }
 
+  return mapVerificationResults(commentsToCheck, byText, byId);
+}
+
+function mapVerificationResults(commentsToCheck, byText, byId) {
   const results = new Map();
   const unresolvedForTextFallback = [];
   const claimedVisibleIds = new Set();
@@ -513,5 +521,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   return false;
 });
+
+globalThis.__YTCC_CONTENT_TEST_HOOKS__ = {
+  normalizeText,
+  getVideoIdFromUrl,
+  getCommentIdFromUrl,
+  shouldSkipDuplicateCapture,
+  mapVerificationResults
+};
 
 console.log('[YT Comment Monitor] Content script loaded');

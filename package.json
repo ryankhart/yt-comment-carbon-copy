@@ -1,0 +1,9 @@
+{
+  "name": "yt-comment-carbon-copy",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Test tooling for YT Comment Carbon Copy",
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  }
+}

@@ -100,6 +100,11 @@ After making changes:
 3. If you modified the content script, also reload any YouTube pages
 4. If you modified the popup, close and reopen it
 
+Run regression tests:
+```bash
+npm test
+```
+
 ### Debugging
 
 - **Content script logs**: Open DevTools (F12) on any YouTube page

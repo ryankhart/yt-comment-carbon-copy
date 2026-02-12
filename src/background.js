@@ -357,6 +357,44 @@ async function getComments() {
   return comments;
 }
 
+function applyStatusTransition(
+  currentComment,
+  { status, deletedAt, archivedAt, unknownAt, unknownReason, updateLastCheckedAt = true } = {},
+  now = Date.now()
+) {
+  const updated = { ...currentComment, status };
+
+  if (updateLastCheckedAt) {
+    updated.lastCheckedAt = now;
+  }
+
+  if (status === STATUS_DELETED) {
+    updated.deletedAt = deletedAt ?? now;
+  } else if (deletedAt !== undefined) {
+    updated.deletedAt = deletedAt;
+  } else if (status === STATUS_ACTIVE) {
+    updated.deletedAt = null;
+  }
+
+  if (status === STATUS_ARCHIVED) {
+    updated.archivedAt = archivedAt ?? now;
+  } else if (archivedAt !== undefined) {
+    updated.archivedAt = archivedAt;
+  } else {
+    updated.archivedAt = null;
+  }
+
+  if (status === STATUS_UNKNOWN) {
+    updated.unknownAt = unknownAt ?? now;
+    updated.unknownReason = unknownReason || null;
+  } else {
+    updated.unknownAt = unknownAt !== undefined ? unknownAt : null;
+    updated.unknownReason = unknownReason !== undefined ? unknownReason : null;
+  }
+
+  return updated;
+}
+
 function normalizeCommentText(value) {
   if (!value) return '';
   return String(value).replace(/\s+/g, ' ').trim();
@@ -535,36 +573,11 @@ async function setCommentStatus(
     return false;
   }
 
-  const updated = { ...comments[id] };
-  updated.status = status;
-
-  if (updateLastCheckedAt) {
-    updated.lastCheckedAt = Date.now();
-  }
-
-  if (status === STATUS_DELETED) {
-    updated.deletedAt = deletedAt ?? Date.now();
-  } else if (deletedAt !== undefined) {
-    updated.deletedAt = deletedAt;
-  } else if (status === STATUS_ACTIVE) {
-    updated.deletedAt = null;
-  }
-
-  if (status === STATUS_ARCHIVED) {
-    updated.archivedAt = archivedAt ?? Date.now();
-  } else if (archivedAt !== undefined) {
-    updated.archivedAt = archivedAt;
-  } else {
-    updated.archivedAt = null;
-  }
-
-  if (status === STATUS_UNKNOWN) {
-    updated.unknownAt = unknownAt ?? Date.now();
-    updated.unknownReason = unknownReason || null;
-  } else {
-    updated.unknownAt = unknownAt !== undefined ? unknownAt : null;
-    updated.unknownReason = unknownReason !== undefined ? unknownReason : null;
-  }
+  const updated = applyStatusTransition(
+    comments[id],
+    { status, deletedAt, archivedAt, unknownAt, unknownReason, updateLastCheckedAt },
+    Date.now()
+  );
 
   comments[id] = updated;
   await chrome.storage.local.set({ comments });
@@ -860,6 +873,16 @@ function waitForContentScript(tabId, comments, timeoutMs = 10000) {
     attempt();
   });
 }
+
+globalThis.__YTCC_BACKGROUND_TEST_HOOKS__ = {
+  normalizeSettings,
+  getAutoArchiveAfterMs,
+  applyStatusTransition,
+  STATUS_ACTIVE,
+  STATUS_DELETED,
+  STATUS_ARCHIVED,
+  STATUS_UNKNOWN
+};
 
 // Message handler
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
