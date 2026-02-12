@@ -13,6 +13,7 @@
       --bg-card: #ffffff;
       --bg-card-deleted: #fdf2f2;
       --bg-card-archived: #f5f7fb;
+      --bg-card-unknown: #fffbeb;
       --bg-button: #f5f5f5;
       --bg-button-hover: #e5e5e5;
       --bg-status-error: #fdf2f2;
@@ -28,10 +29,12 @@
       --text-deleted: #e74c3c;
       --text-active: #27ae60;
       --text-archived: #6b7280;
+      --text-unknown: #b45309;
 
       --border-primary: #dddddd;
       --border-deleted: #e74c3c;
       --border-archived: #cbd5e1;
+      --border-unknown: #fcd34d;
       --border-notice: #bfdbfe;
 
       --btn-primary-bg: #cc0000;
@@ -47,6 +50,7 @@
         --bg-card: #252525;
         --bg-card-deleted: #3a2020;
         --bg-card-archived: #202733;
+        --bg-card-unknown: #3a2a10;
         --bg-button: #2a2a2a;
         --bg-button-hover: #3a3a3a;
         --bg-status-error: #3a2020;
@@ -62,10 +66,12 @@
         --text-deleted: #ff6b6b;
         --text-active: #4ade80;
         --text-archived: #9ca3af;
+        --text-unknown: #fbbf24;
 
         --border-primary: #404040;
         --border-deleted: #ff6b6b;
         --border-archived: #64748b;
+        --border-unknown: #92400e;
         --border-notice: #334155;
 
         --btn-primary-bg: #cc0000;
@@ -249,6 +255,11 @@
       background: var(--bg-card-archived);
     }
 
+    .comment-card.unknown {
+      border-color: var(--border-unknown);
+      background: var(--bg-card-unknown);
+    }
+
     .comment-text {
       font-size: 13px;
       line-height: 1.4;
@@ -299,6 +310,10 @@
 
     .status-badge.archived {
       color: var(--text-archived);
+    }
+
+    .status-badge.unknown {
+      color: var(--text-unknown);
     }
 
     .copy-btn,

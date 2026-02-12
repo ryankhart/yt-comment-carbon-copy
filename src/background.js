@@ -21,6 +21,7 @@ chrome.runtime.onStartup?.addListener(() => {
 const STATUS_ACTIVE = 'active';
 const STATUS_DELETED = 'deleted';
 const STATUS_ARCHIVED = 'archived';
+const STATUS_UNKNOWN = 'unknown';
 const AUTO_ARCHIVE_AFTER_MS = 24 * 60 * 60 * 1000;
 
 // Generate unique ID for comments
@@ -45,6 +46,8 @@ async function saveComment(payload) {
     lastCheckedAt: null,
     deletedAt: null,
     archivedAt: null,
+    unknownAt: null,
+    unknownReason: null,
     commentId: payload.commentId || null,
     commentUrl: payload.commentUrl || null
   };
@@ -62,7 +65,10 @@ async function getComments() {
 }
 
 // Update a comment's status
-async function setCommentStatus(id, { status, deletedAt, archivedAt, updateLastCheckedAt = true } = {}) {
+async function setCommentStatus(
+  id,
+  { status, deletedAt, archivedAt, unknownAt, unknownReason, updateLastCheckedAt = true } = {}
+) {
   const { comments } = await chrome.storage.local.get('comments');
 
   if (!comments || !comments[id]) {
@@ -90,6 +96,14 @@ async function setCommentStatus(id, { status, deletedAt, archivedAt, updateLastC
     updated.archivedAt = archivedAt;
   } else {
     updated.archivedAt = null;
+  }
+
+  if (status === STATUS_UNKNOWN) {
+    updated.unknownAt = unknownAt ?? Date.now();
+    updated.unknownReason = unknownReason || null;
+  } else {
+    updated.unknownAt = unknownAt !== undefined ? unknownAt : null;
+    updated.unknownReason = unknownReason !== undefined ? unknownReason : null;
   }
 
   comments[id] = updated;
@@ -142,7 +156,7 @@ async function unarchiveComment(id) {
 async function handleCheckComments(videoId) {
   const comments = await getComments();
   const toCheck = Object.values(comments)
-    .filter(c => c.videoId === videoId && c.status === STATUS_ACTIVE);
+    .filter((c) => c.videoId === videoId && (c.status === STATUS_ACTIVE || c.status === STATUS_UNKNOWN));
 
   if (toCheck.length === 0) {
     return {
@@ -150,7 +164,8 @@ async function handleCheckComments(videoId) {
       message: 'No comments to check for this video',
       checkedCount: 0,
       deletedCount: 0,
-      archivedCount: 0
+      archivedCount: 0,
+      unknownCount: 0
     };
   }
 
@@ -174,10 +189,17 @@ async function handleCheckComments(videoId) {
     // Update storage for deleted comments
     let deletedCount = 0;
     let archivedCount = 0;
+    let unknownCount = 0;
     const now = Date.now();
     const byId = new Map(toCheck.map((comment) => [comment.id, comment]));
     for (const result of response.results) {
       if (result.found === null) {
+        await setCommentStatus(result.id, {
+          status: STATUS_UNKNOWN,
+          unknownAt: now,
+          unknownReason: result.reason || 'verification_incomplete'
+        });
+        unknownCount++;
         continue;
       }
       if (!result.found) {
@@ -210,16 +232,16 @@ async function handleCheckComments(videoId) {
       }
     }
 
-    const archivedSummary = archivedCount
-      ? ` ${archivedCount} archived.`
-      : '';
+    const archivedSummary = archivedCount ? ` ${archivedCount} archived.` : '';
+    const unknownSummary = unknownCount ? ` ${unknownCount} unknown.` : '';
 
     return {
       success: true,
-      message: `Checked ${toCheck.length} comment${toCheck.length !== 1 ? 's' : ''}. ${deletedCount} deleted.${archivedSummary}`,
+      message: `Checked ${toCheck.length} comment${toCheck.length !== 1 ? 's' : ''}. ${deletedCount} deleted.${archivedSummary}${unknownSummary}`,
       checkedCount: toCheck.length,
       deletedCount,
-      archivedCount
+      archivedCount,
+      unknownCount
     };
   } catch (error) {
     console.error('[YT Comment Carbon Copy] Check failed:', error);
@@ -230,7 +252,7 @@ async function handleCheckComments(videoId) {
 // Handle checking all comments for a video by opening it in a background tab
 async function handleCheckAllComments(videoId, comments) {
   if (!comments || comments.length === 0) {
-    return { success: true, videoId, deletedCount: 0, checkedCount: 0 };
+    return { success: true, videoId, deletedCount: 0, checkedCount: 0, archivedCount: 0, unknownCount: 0 };
   }
 
   try {
@@ -250,11 +272,18 @@ async function handleCheckAllComments(videoId, comments) {
     // Update storage for deleted comments
     let deletedCount = 0;
     let archivedCount = 0;
+    let unknownCount = 0;
     const now = Date.now();
     const byId = new Map(comments.map((comment) => [comment.id, comment]));
     if (response?.results) {
       for (const result of response.results) {
         if (result.found === null) {
+          await setCommentStatus(result.id, {
+            status: STATUS_UNKNOWN,
+            unknownAt: now,
+            unknownReason: result.reason || 'verification_incomplete'
+          });
+          unknownCount++;
           continue;
         }
         if (!result.found) {
@@ -295,6 +324,7 @@ async function handleCheckAllComments(videoId, comments) {
       videoId,
       deletedCount,
       archivedCount,
+      unknownCount,
       checkedCount: comments.length
     };
   } catch (error) {
@@ -304,7 +334,8 @@ async function handleCheckAllComments(videoId, comments) {
       videoId,
       error: error.message,
       deletedCount: 0,
-      archivedCount: 0
+      archivedCount: 0,
+      unknownCount: 0
     };
   }
 }

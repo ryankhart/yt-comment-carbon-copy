@@ -7,6 +7,7 @@ const EMPTY_ARCHIVED_HTML = 'No active comments.<br>Use "Show Archived" to view 
 const STATUS_ACTIVE = 'active';
 const STATUS_DELETED = 'deleted';
 const STATUS_ARCHIVED = 'archived';
+const STATUS_UNKNOWN = 'unknown';
 const AUTO_ARCHIVE_NOTICE_KEY = 'autoArchiveNotice';
 
 let showArchived = false;
@@ -104,8 +105,21 @@ function createCommentCard(comment) {
   const status = getStatus(comment);
   const isDeleted = status === STATUS_DELETED;
   const isArchived = status === STATUS_ARCHIVED;
-  const statusClass = isDeleted ? 'deleted' : isArchived ? 'archived' : 'active';
-  const statusLabel = isDeleted ? 'DELETED' : isArchived ? 'Archived' : 'Active';
+  const isUnknown = status === STATUS_UNKNOWN;
+  const statusClass = isDeleted
+    ? 'deleted'
+    : isArchived
+      ? 'archived'
+      : isUnknown
+        ? 'unknown'
+        : 'active';
+  const statusLabel = isDeleted
+    ? 'DELETED'
+    : isArchived
+      ? 'Archived'
+      : isUnknown
+        ? 'Unknown'
+        : 'Active';
 
   const date = new Date(comment.submittedAt).toLocaleDateString();
   const videoTitle = comment.videoTitle || 'Unknown video';
@@ -114,7 +128,7 @@ function createCommentCard(comment) {
   const archiveLabel = isArchived ? 'Unarchive' : 'Archive';
 
   return `
-    <div class="comment-card ${isDeleted ? 'deleted' : ''} ${isArchived ? 'archived' : ''}">
+    <div class="comment-card ${isDeleted ? 'deleted' : ''} ${isArchived ? 'archived' : ''} ${isUnknown ? 'unknown' : ''}">
       <div class="comment-text">${escapeHtml(comment.text)}</div>
       <div class="comment-meta">
         <div class="comment-info">
@@ -170,7 +184,10 @@ async function handleCheckAll() {
     }
 
     const allComments = Object.values(response.comments);
-    const activeComments = allComments.filter((c) => getStatus(c) === STATUS_ACTIVE && c.videoId);
+    const activeComments = allComments.filter((c) => {
+      const status = getStatus(c);
+      return (status === STATUS_ACTIVE || status === STATUS_UNKNOWN) && c.videoId;
+    });
 
     if (activeComments.length === 0) {
       showStatus('No active comments to check', 'success');
@@ -193,6 +210,7 @@ async function handleCheckAll() {
     let processedVideos = 0;
     let totalDeleted = 0;
     let totalArchived = 0;
+    let totalUnknown = 0;
 
     showProgress(`Checking 0/${totalVideos} videos...`, 0);
 
@@ -218,6 +236,9 @@ async function handleCheckAll() {
         if (result?.archivedCount) {
           totalArchived += result.archivedCount;
         }
+        if (result?.unknownCount) {
+          totalUnknown += result.unknownCount;
+        }
       } catch (error) {
         console.error(`Failed to check video ${videoId}:`, error);
       }
@@ -234,7 +255,10 @@ async function handleCheckAll() {
     const archivedSummary = totalArchived
       ? ` ${totalArchived} archived.`
       : '';
-    showStatus(`Checked ${activeComments.length} comment${activeComments.length !== 1 ? 's' : ''} across ${totalVideos} video${totalVideos !== 1 ? 's' : ''}. ${totalDeleted} deleted.${archivedSummary}`, 'success');
+    const unknownSummary = totalUnknown
+      ? ` ${totalUnknown} unknown.`
+      : '';
+    showStatus(`Checked ${activeComments.length} comment${activeComments.length !== 1 ? 's' : ''} across ${totalVideos} video${totalVideos !== 1 ? 's' : ''}. ${totalDeleted} deleted.${archivedSummary}${unknownSummary}`, 'success');
     await handleAutoArchiveNotice(totalArchived);
 
     // Refresh the comment list
