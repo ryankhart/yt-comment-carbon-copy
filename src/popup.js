@@ -12,10 +12,12 @@ const AUTO_ARCHIVE_NOTICE_KEY = 'autoArchiveNotice';
 const DEFAULT_SETTINGS = {
   autoCheckEnabled: false,
   autoCheckIntervalHours: 12,
-  autoCheckNotifications: false
+  autoCheckNotifications: false,
+  autoArchiveHours: 24
 };
 
 let allComments = [];
+let currentSettings = { ...DEFAULT_SETTINGS };
 
 async function init() {
   bindAutoArchiveNoticeDismiss();
@@ -296,7 +298,7 @@ async function handleCheckAll() {
       ? ` ${totalUnknown} unknown.`
       : '';
     showStatus(`Checked ${activeComments.length} comment${activeComments.length !== 1 ? 's' : ''} across ${totalVideos} video${totalVideos !== 1 ? 's' : ''}. ${totalDeleted} deleted.${archivedSummary}${unknownSummary}`, 'success');
-    await handleAutoArchiveNotice(totalArchived);
+    await handleAutoArchiveNotice(totalArchived, currentSettings.autoArchiveHours);
 
     // Refresh the comment list
     await loadComments();
@@ -342,7 +344,7 @@ async function handleCheck() {
         showStatus('Check failed: ' + chrome.runtime.lastError.message, 'error');
       } else if (response?.success) {
         showStatus(response.message, 'success');
-        await handleAutoArchiveNotice(response.archivedCount || 0);
+        await handleAutoArchiveNotice(response.archivedCount || 0, response.autoArchiveHours ?? currentSettings.autoArchiveHours);
       } else {
         showStatus(response?.message || 'Check failed', 'error');
       }
@@ -396,9 +398,11 @@ async function loadSettings() {
 
 function applySettingsToForm(settings) {
   const normalized = { ...DEFAULT_SETTINGS, ...(settings || {}) };
+  currentSettings = normalized;
   document.getElementById('auto-check-enabled').checked = Boolean(normalized.autoCheckEnabled);
   document.getElementById('auto-check-notify').checked = Boolean(normalized.autoCheckNotifications);
   document.getElementById('auto-check-interval').value = String(normalized.autoCheckIntervalHours);
+  document.getElementById('auto-archive-hours').value = String(normalized.autoArchiveHours);
   updateSettingsFormState();
 }
 
@@ -416,7 +420,8 @@ async function handleSaveSettings() {
   const payload = {
     autoCheckEnabled: document.getElementById('auto-check-enabled').checked,
     autoCheckIntervalHours: Number(document.getElementById('auto-check-interval').value),
-    autoCheckNotifications: document.getElementById('auto-check-notify').checked
+    autoCheckNotifications: document.getElementById('auto-check-notify').checked,
+    autoArchiveHours: Number(document.getElementById('auto-archive-hours').value)
   };
 
   setSettingsSaving(true);
@@ -515,30 +520,41 @@ function bindAutoArchiveNoticeDismiss() {
 async function renderStoredAutoArchiveNotice() {
   const data = await chrome.storage.local.get(AUTO_ARCHIVE_NOTICE_KEY);
   const count = data?.[AUTO_ARCHIVE_NOTICE_KEY]?.count || 0;
+  const hours = data?.[AUTO_ARCHIVE_NOTICE_KEY]?.hours ?? currentSettings.autoArchiveHours;
   if (count > 0) {
-    showAutoArchiveNotice(count);
+    showAutoArchiveNotice(count, hours);
   } else {
     hideAutoArchiveNotice();
   }
 }
 
-async function handleAutoArchiveNotice(count) {
+async function handleAutoArchiveNotice(count, hours) {
   if (!count) {
     return;
   }
 
   const notice = {
     count,
+    hours,
     createdAt: Date.now()
   };
   await chrome.storage.local.set({ [AUTO_ARCHIVE_NOTICE_KEY]: notice });
-  showAutoArchiveNotice(count);
+  showAutoArchiveNotice(count, hours);
 }
 
-function showAutoArchiveNotice(count) {
+function showAutoArchiveNotice(count, hours) {
+  const archiveLabel = Number(hours) === 1
+    ? '1 hour'
+    : Number(hours) === 24
+      ? '24 hours'
+      : Number(hours) === 72
+        ? '3 days'
+        : Number(hours) === 168
+          ? '7 days'
+          : `${hours} hours`;
   const notice = document.getElementById('auto-archive-notice');
   const text = document.getElementById('auto-archive-notice-text');
-  text.textContent = `${count} comment${count !== 1 ? 's were' : ' was'} auto-archived after 24 hours to keep your active feed clean.`;
+  text.textContent = `${count} comment${count !== 1 ? 's were' : ' was'} auto-archived after ${archiveLabel} to keep your active feed clean.`;
   notice.classList.remove('hidden');
 }
 

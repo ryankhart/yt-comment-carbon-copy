@@ -7,6 +7,7 @@ A Chrome extension that captures your YouTube comments and alerts you when they 
 - **Automatic Comment Capture**: Saves every comment you post on YouTube
 - **Deletion Detection**: Check if your comments have been shadow-deleted or removed
 - **Scheduled Checks**: Run automatic checks every 6/12/24 hours
+- **Configurable Auto-Archive**: Keep active feed clean on your own retention window
 - **Comment History**: View all your captured comments with timestamps and video titles
 - **Search & Filters**: Filter by text, video title, status, and recency
 - **Easy Copying**: One-click copy of any saved comment
@@ -50,6 +51,7 @@ Simply post comments on YouTube as you normally would. The extension automatical
 2. Turn on "Enable scheduled checks"
 3. Pick an interval (6/12/24 hours)
 4. Optionally enable notifications for deleted/unknown results
+5. Choose auto-archive retention (Never / 24h / 3d / 7d)
 
 ### Viewing Your Comment History
 

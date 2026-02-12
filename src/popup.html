@@ -248,7 +248,8 @@
       flex: 1;
     }
 
-    #auto-check-interval {
+    #auto-check-interval,
+    #auto-archive-hours {
       width: 100%;
       padding: 5px 6px;
       border: 1px solid var(--border-primary);
@@ -502,6 +503,15 @@
         <option value="6">6 hours</option>
         <option value="12">12 hours</option>
         <option value="24">24 hours</option>
+      </select>
+    </div>
+    <div class="setting-row">
+      <label for="auto-archive-hours">Auto-archive after</label>
+      <select id="auto-archive-hours">
+        <option value="0">Never</option>
+        <option value="24">24 hours</option>
+        <option value="72">3 days</option>
+        <option value="168">7 days</option>
       </select>
     </div>
     <div class="setting-row">

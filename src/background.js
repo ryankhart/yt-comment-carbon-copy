@@ -8,12 +8,13 @@ const SETTINGS_KEY = 'settings';
 const LAST_AUTO_CHECK_KEY = 'lastAutoCheck';
 const AUTO_CHECK_ALARM = 'autoCheckComments';
 const SUPPORTED_AUTO_CHECK_INTERVALS = [6, 12, 24];
+const SUPPORTED_AUTO_ARCHIVE_HOURS = [0, 24, 72, 168];
 const DEFAULT_SETTINGS = {
   autoCheckEnabled: false,
   autoCheckIntervalHours: 12,
-  autoCheckNotifications: false
+  autoCheckNotifications: false,
+  autoArchiveHours: 24
 };
-const AUTO_ARCHIVE_AFTER_MS = 24 * 60 * 60 * 1000;
 
 let autoCheckInProgress = false;
 
@@ -27,12 +28,23 @@ function normalizeSettings(settings) {
   const autoCheckIntervalHours = SUPPORTED_AUTO_CHECK_INTERVALS.includes(Number(source.autoCheckIntervalHours))
     ? Number(source.autoCheckIntervalHours)
     : DEFAULT_SETTINGS.autoCheckIntervalHours;
+  const autoArchiveHours = SUPPORTED_AUTO_ARCHIVE_HOURS.includes(Number(source.autoArchiveHours))
+    ? Number(source.autoArchiveHours)
+    : DEFAULT_SETTINGS.autoArchiveHours;
 
   return {
     autoCheckEnabled: Boolean(source.autoCheckEnabled),
     autoCheckIntervalHours,
-    autoCheckNotifications: Boolean(source.autoCheckNotifications)
+    autoCheckNotifications: Boolean(source.autoCheckNotifications),
+    autoArchiveHours
   };
+}
+
+function getAutoArchiveAfterMs(autoArchiveHours) {
+  if (!autoArchiveHours) {
+    return null;
+  }
+  return autoArchiveHours * 60 * 60 * 1000;
 }
 
 function buildAutoCheckSummaryMessage(summary) {
@@ -478,9 +490,10 @@ async function updateCommentMeta({ id, commentId, commentUrl }) {
   return true;
 }
 
-function shouldAutoArchive(comment, now = Date.now()) {
+function shouldAutoArchive(comment, autoArchiveAfterMs, now = Date.now()) {
+  if (!autoArchiveAfterMs) return false;
   if (!comment?.submittedAt) return false;
-  return now - comment.submittedAt >= AUTO_ARCHIVE_AFTER_MS;
+  return now - comment.submittedAt >= autoArchiveAfterMs;
 }
 
 async function unarchiveComment(id) {
@@ -504,6 +517,8 @@ async function unarchiveComment(id) {
 // Handle checking comments for a specific video
 async function handleCheckComments(videoId) {
   const comments = await getComments();
+  const settings = await getSettings();
+  const autoArchiveAfterMs = getAutoArchiveAfterMs(settings.autoArchiveHours);
   const toCheck = Object.values(comments)
     .filter((c) => c.videoId === videoId && (c.status === STATUS_ACTIVE || c.status === STATUS_UNKNOWN));
 
@@ -559,7 +574,7 @@ async function handleCheckComments(videoId) {
         deletedCount++;
       } else {
         const comment = byId.get(result.id);
-        if (comment && shouldAutoArchive(comment, now)) {
+        if (comment && shouldAutoArchive(comment, autoArchiveAfterMs, now)) {
           await setCommentStatus(result.id, {
             status: STATUS_ARCHIVED,
             archivedAt: now
@@ -590,7 +605,8 @@ async function handleCheckComments(videoId) {
       checkedCount: toCheck.length,
       deletedCount,
       archivedCount,
-      unknownCount
+      unknownCount,
+      autoArchiveHours: settings.autoArchiveHours
     };
   } catch (error) {
     console.error('[YT Comment Carbon Copy] Check failed:', error);
@@ -600,8 +616,19 @@ async function handleCheckComments(videoId) {
 
 // Handle checking all comments for a video by opening it in a background tab
 async function handleCheckAllComments(videoId, comments) {
+  const settings = await getSettings();
+  const autoArchiveAfterMs = getAutoArchiveAfterMs(settings.autoArchiveHours);
+
   if (!comments || comments.length === 0) {
-    return { success: true, videoId, deletedCount: 0, checkedCount: 0, archivedCount: 0, unknownCount: 0 };
+    return {
+      success: true,
+      videoId,
+      deletedCount: 0,
+      checkedCount: 0,
+      archivedCount: 0,
+      unknownCount: 0,
+      autoArchiveHours: settings.autoArchiveHours
+    };
   }
 
   try {
@@ -643,7 +670,7 @@ async function handleCheckAllComments(videoId, comments) {
           deletedCount++;
         } else {
           const comment = byId.get(result.id);
-          if (comment && shouldAutoArchive(comment, now)) {
+          if (comment && shouldAutoArchive(comment, autoArchiveAfterMs, now)) {
             await setCommentStatus(result.id, {
               status: STATUS_ARCHIVED,
               archivedAt: now
@@ -683,7 +710,8 @@ async function handleCheckAllComments(videoId, comments) {
       deletedCount,
       archivedCount,
       unknownCount,
-      checkedCount: comments.length
+      checkedCount: comments.length,
+      autoArchiveHours: settings.autoArchiveHours
     };
   } catch (error) {
     console.error('[YT Comment Carbon Copy] Batch check failed for video:', videoId, error);
@@ -693,7 +721,8 @@ async function handleCheckAllComments(videoId, comments) {
       error: error.message,
       deletedCount: 0,
       archivedCount: 0,
-      unknownCount: 0
+      unknownCount: 0,
+      autoArchiveHours: settings.autoArchiveHours
     };
   }
 }
