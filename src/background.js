@@ -1,33 +1,218 @@
 // YT Comment Carbon Copy - Background Service Worker
 
-// Initialize storage on install
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get('comments', (data) => {
-    if (!data.comments) {
-      chrome.storage.local.set({ comments: {} });
-    }
-  });
-});
-
-// Ensure storage exists even if onInstalled did not run (e.g., reload)
-chrome.runtime.onStartup?.addListener(() => {
-  chrome.storage.local.get('comments', (data) => {
-    if (!data.comments) {
-      chrome.storage.local.set({ comments: {} });
-    }
-  });
-});
-
 const STATUS_ACTIVE = 'active';
 const STATUS_DELETED = 'deleted';
 const STATUS_ARCHIVED = 'archived';
 const STATUS_UNKNOWN = 'unknown';
+const SETTINGS_KEY = 'settings';
+const LAST_AUTO_CHECK_KEY = 'lastAutoCheck';
+const AUTO_CHECK_ALARM = 'autoCheckComments';
+const SUPPORTED_AUTO_CHECK_INTERVALS = [6, 12, 24];
+const DEFAULT_SETTINGS = {
+  autoCheckEnabled: false,
+  autoCheckIntervalHours: 12,
+  autoCheckNotifications: false
+};
 const AUTO_ARCHIVE_AFTER_MS = 24 * 60 * 60 * 1000;
+
+let autoCheckInProgress = false;
 
 // Generate unique ID for comments
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
 }
+
+function normalizeSettings(settings) {
+  const source = settings || {};
+  const autoCheckIntervalHours = SUPPORTED_AUTO_CHECK_INTERVALS.includes(Number(source.autoCheckIntervalHours))
+    ? Number(source.autoCheckIntervalHours)
+    : DEFAULT_SETTINGS.autoCheckIntervalHours;
+
+  return {
+    autoCheckEnabled: Boolean(source.autoCheckEnabled),
+    autoCheckIntervalHours,
+    autoCheckNotifications: Boolean(source.autoCheckNotifications)
+  };
+}
+
+function buildAutoCheckSummaryMessage(summary) {
+  const deletedPart = `${summary.deletedCount} deleted`;
+  const unknownPart = `${summary.unknownCount} unknown`;
+  return `Checked ${summary.checkedCount} comments across ${summary.videoCount} videos: ${deletedPart}, ${unknownPart}.`;
+}
+
+async function ensureStorageDefaults() {
+  const data = await chrome.storage.local.get(['comments', SETTINGS_KEY]);
+  const updates = {};
+
+  if (!data.comments) {
+    updates.comments = {};
+  }
+
+  const normalizedSettings = normalizeSettings(data[SETTINGS_KEY]);
+  if (!data[SETTINGS_KEY] || JSON.stringify(data[SETTINGS_KEY]) !== JSON.stringify(normalizedSettings)) {
+    updates[SETTINGS_KEY] = normalizedSettings;
+  }
+
+  if (Object.keys(updates).length > 0) {
+    await chrome.storage.local.set(updates);
+  }
+
+  return normalizedSettings;
+}
+
+async function getSettings() {
+  const data = await chrome.storage.local.get(SETTINGS_KEY);
+  return normalizeSettings(data[SETTINGS_KEY]);
+}
+
+async function syncAutoCheckAlarm(settingsInput = null) {
+  const settings = settingsInput || await getSettings();
+
+  await chrome.alarms.clear(AUTO_CHECK_ALARM);
+
+  if (!settings.autoCheckEnabled) {
+    return;
+  }
+
+  await chrome.alarms.create(AUTO_CHECK_ALARM, {
+    delayInMinutes: 1,
+    periodInMinutes: settings.autoCheckIntervalHours * 60
+  });
+}
+
+async function updateSettings(patch) {
+  const current = await getSettings();
+  const next = normalizeSettings({ ...current, ...(patch || {}) });
+  await chrome.storage.local.set({ [SETTINGS_KEY]: next });
+  await syncAutoCheckAlarm(next);
+  return next;
+}
+
+async function maybeNotifyAutoCheck(summary, settings) {
+  if (!settings.autoCheckNotifications) {
+    return;
+  }
+
+  if (summary.deletedCount === 0 && summary.unknownCount === 0) {
+    return;
+  }
+
+  try {
+    await chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon-128.png',
+      title: 'YT Comment Carbon Copy',
+      message: buildAutoCheckSummaryMessage(summary)
+    });
+  } catch (error) {
+    console.error('[YT Comment Carbon Copy] Notification failed:', error);
+  }
+}
+
+async function runAutoCheckCycle(trigger = 'alarm') {
+  if (autoCheckInProgress) {
+    return {
+      success: false,
+      skipped: true,
+      reason: 'already_running'
+    };
+  }
+
+  autoCheckInProgress = true;
+  try {
+    const settings = await getSettings();
+    if (!settings.autoCheckEnabled && trigger === 'alarm') {
+      return { success: true, skipped: true, reason: 'disabled' };
+    }
+
+    const comments = await getComments();
+    const activeComments = Object.values(comments).filter((comment) => {
+      const status = comment.status || STATUS_ACTIVE;
+      return (status === STATUS_ACTIVE || status === STATUS_UNKNOWN) && Boolean(comment.videoId);
+    });
+
+    if (activeComments.length === 0) {
+      const summary = {
+        trigger,
+        checkedAt: Date.now(),
+        checkedCount: 0,
+        deletedCount: 0,
+        archivedCount: 0,
+        unknownCount: 0,
+        videoCount: 0
+      };
+      await chrome.storage.local.set({ [LAST_AUTO_CHECK_KEY]: summary });
+      return { success: true, summary };
+    }
+
+    const commentsByVideo = {};
+    activeComments.forEach((comment) => {
+      if (!commentsByVideo[comment.videoId]) {
+        commentsByVideo[comment.videoId] = [];
+      }
+      commentsByVideo[comment.videoId].push(comment);
+    });
+
+    const videoIds = Object.keys(commentsByVideo);
+    let deletedCount = 0;
+    let archivedCount = 0;
+    let unknownCount = 0;
+
+    for (const videoId of videoIds) {
+      const result = await handleCheckAllComments(videoId, commentsByVideo[videoId]);
+      if (!result?.success) {
+        continue;
+      }
+      deletedCount += result.deletedCount || 0;
+      archivedCount += result.archivedCount || 0;
+      unknownCount += result.unknownCount || 0;
+    }
+
+    const summary = {
+      trigger,
+      checkedAt: Date.now(),
+      checkedCount: activeComments.length,
+      deletedCount,
+      archivedCount,
+      unknownCount,
+      videoCount: videoIds.length
+    };
+
+    await chrome.storage.local.set({ [LAST_AUTO_CHECK_KEY]: summary });
+    await maybeNotifyAutoCheck(summary, settings);
+
+    return { success: true, summary };
+  } finally {
+    autoCheckInProgress = false;
+  }
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  ensureStorageDefaults()
+    .then((settings) => syncAutoCheckAlarm(settings))
+    .catch((error) => console.error('[YT Comment Carbon Copy] Install init failed:', error));
+});
+
+chrome.runtime.onStartup?.addListener(() => {
+  ensureStorageDefaults()
+    .then((settings) => syncAutoCheckAlarm(settings))
+    .catch((error) => console.error('[YT Comment Carbon Copy] Startup init failed:', error));
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== AUTO_CHECK_ALARM) {
+    return;
+  }
+
+  runAutoCheckCycle('alarm').catch((error) => {
+    console.error('[YT Comment Carbon Copy] Scheduled check failed:', error);
+  });
+});
+
+ensureStorageDefaults()
+  .then((settings) => syncAutoCheckAlarm(settings))
+  .catch((error) => console.error('[YT Comment Carbon Copy] Init failed:', error));
 
 // Save a new comment to storage
 async function saveComment(payload) {
@@ -314,6 +499,15 @@ async function handleCheckAllComments(videoId, comments) {
           }
         }
       }
+    } else {
+      for (const comment of comments) {
+        await setCommentStatus(comment.id, {
+          status: STATUS_UNKNOWN,
+          unknownAt: now,
+          unknownReason: 'verification_timeout'
+        });
+      }
+      unknownCount = comments.length;
     }
 
     // Close the tab
@@ -390,6 +584,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .then(comments => sendResponse({ success: true, comments }))
         .catch(error => {
           console.error('[YT Comment Carbon Copy] Get failed:', error);
+          sendResponse({ success: false, error: error.message });
+        });
+      return true;
+
+    case 'GET_SETTINGS':
+      Promise.all([
+        getSettings(),
+        chrome.storage.local.get(LAST_AUTO_CHECK_KEY)
+      ])
+        .then(([settings, data]) => {
+          sendResponse({
+            success: true,
+            settings,
+            lastAutoCheck: data?.[LAST_AUTO_CHECK_KEY] || null
+          });
+        })
+        .catch((error) => {
+          console.error('[YT Comment Carbon Copy] Get settings failed:', error);
+          sendResponse({ success: false, error: error.message });
+        });
+      return true;
+
+    case 'UPDATE_SETTINGS':
+      updateSettings(message.payload)
+        .then((settings) => sendResponse({ success: true, settings }))
+        .catch((error) => {
+          console.error('[YT Comment Carbon Copy] Update settings failed:', error);
           sendResponse({ success: false, error: error.message });
         });
       return true;
