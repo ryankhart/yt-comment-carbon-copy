@@ -184,23 +184,31 @@
 
     #filters {
       margin-bottom: 12px;
-      display: flex;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
       gap: 8px;
-      flex-wrap: wrap;
     }
 
-    #filters button {
-      padding: 6px 12px;
-      background: var(--bg-button);
-      color: var(--text-primary);
+    #filter-query {
+      grid-column: 1 / -1;
+      width: 100%;
+      padding: 6px 8px;
       border: 1px solid var(--border-primary);
       border-radius: 4px;
-      cursor: pointer;
+      background: var(--bg-primary);
+      color: var(--text-primary);
       font-size: 12px;
     }
 
-    #filters button:hover {
-      background: var(--bg-button-hover);
+    #filter-status,
+    #filter-date-range {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid var(--border-primary);
+      border-radius: 4px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-size: 12px;
     }
 
     #auto-check-settings {
@@ -464,7 +472,20 @@
   </div>
 
   <div id="filters">
-    <button id="toggleArchivedBtn">Show Archived</button>
+    <input id="filter-query" type="search" placeholder="Search text or video title">
+    <select id="filter-status">
+      <option value="all">All statuses</option>
+      <option value="active">Active</option>
+      <option value="deleted">Deleted</option>
+      <option value="unknown">Unknown</option>
+      <option value="archived">Archived</option>
+    </select>
+    <select id="filter-date-range">
+      <option value="all">All time</option>
+      <option value="7">Last 7 days</option>
+      <option value="30">Last 30 days</option>
+      <option value="90">Last 90 days</option>
+    </select>
   </div>
 
   <div id="auto-check-settings">

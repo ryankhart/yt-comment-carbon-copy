@@ -3,7 +3,7 @@
 document.addEventListener('DOMContentLoaded', init);
 
 const EMPTY_DEFAULT_HTML = 'No comments captured yet.<br>Submit a comment on YouTube to start tracking.';
-const EMPTY_ARCHIVED_HTML = 'No active comments.<br>Use "Show Archived" to view archived items.';
+const EMPTY_FILTERED_HTML = 'No comments match your current filters.';
 const STATUS_ACTIVE = 'active';
 const STATUS_DELETED = 'deleted';
 const STATUS_ARCHIVED = 'archived';
@@ -15,19 +15,18 @@ const DEFAULT_SETTINGS = {
   autoCheckNotifications: false
 };
 
-let showArchived = false;
+let allComments = [];
 
 async function init() {
-  updateArchivedToggle();
   bindAutoArchiveNoticeDismiss();
   bindSettingsControls();
   bindDataTools();
+  bindFilterControls();
   await loadSettings();
   await renderStoredAutoArchiveNotice();
   await loadComments();
   document.getElementById('checkBtn').addEventListener('click', handleCheck);
   document.getElementById('checkAllBtn').addEventListener('click', handleCheckAll);
-  document.getElementById('toggleArchivedBtn').addEventListener('click', toggleArchived);
 }
 
 // Load and display all comments
@@ -41,8 +40,8 @@ async function loadComments() {
       }
 
       if (response?.success) {
-        const comments = Object.values(response.comments);
-        renderComments(comments);
+        allComments = Object.values(response.comments);
+        renderComments(allComments);
       }
       resolve();
     });
@@ -53,10 +52,7 @@ async function loadComments() {
 function renderComments(comments) {
   const list = document.getElementById('comment-list');
   const empty = document.getElementById('empty-state');
-  const archivedCount = comments.filter((comment) => getStatus(comment) === STATUS_ARCHIVED).length;
-  const visibleComments = showArchived
-    ? comments
-    : comments.filter((comment) => getStatus(comment) !== STATUS_ARCHIVED);
+  const visibleComments = filterComments(comments);
 
   if (comments.length === 0) {
     list.innerHTML = '';
@@ -67,7 +63,7 @@ function renderComments(comments) {
 
   if (visibleComments.length === 0) {
     list.innerHTML = '';
-    empty.innerHTML = archivedCount > 0 ? EMPTY_ARCHIVED_HTML : EMPTY_DEFAULT_HTML;
+    empty.innerHTML = EMPTY_FILTERED_HTML;
     empty.classList.remove('hidden');
     return;
   }
@@ -105,6 +101,39 @@ function renderComments(comments) {
       await handleArchiveAction(id, action);
       await loadComments();
     });
+  });
+}
+
+function bindFilterControls() {
+  const rerender = () => renderComments(allComments);
+  document.getElementById('filter-query').addEventListener('input', rerender);
+  document.getElementById('filter-status').addEventListener('change', rerender);
+  document.getElementById('filter-date-range').addEventListener('change', rerender);
+}
+
+function filterComments(comments) {
+  const query = document.getElementById('filter-query').value.trim().toLowerCase();
+  const selectedStatus = document.getElementById('filter-status').value;
+  const selectedRange = document.getElementById('filter-date-range').value;
+  const rangeDays = selectedRange === 'all' ? null : Number(selectedRange);
+  const cutoff = Number.isFinite(rangeDays) ? Date.now() - (rangeDays * 24 * 60 * 60 * 1000) : null;
+
+  return comments.filter((comment) => {
+    const status = getStatus(comment);
+    if (selectedStatus !== 'all' && status !== selectedStatus) {
+      return false;
+    }
+
+    if (cutoff && Number(comment.submittedAt) < cutoff) {
+      return false;
+    }
+
+    if (!query) {
+      return true;
+    }
+
+    const searchable = `${comment.text || ''} ${comment.videoTitle || ''}`.toLowerCase();
+    return searchable.includes(query);
   });
 }
 
@@ -475,11 +504,6 @@ function getStatus(comment) {
   return comment.status || STATUS_ACTIVE;
 }
 
-function updateArchivedToggle() {
-  const toggleBtn = document.getElementById('toggleArchivedBtn');
-  toggleBtn.textContent = showArchived ? 'Hide Archived' : 'Show Archived';
-}
-
 function bindAutoArchiveNoticeDismiss() {
   const dismissButton = document.getElementById('dismiss-auto-archive-notice');
   dismissButton.addEventListener('click', async () => {
@@ -521,12 +545,6 @@ function showAutoArchiveNotice(count) {
 function hideAutoArchiveNotice() {
   const notice = document.getElementById('auto-archive-notice');
   notice.classList.add('hidden');
-}
-
-function toggleArchived() {
-  showArchived = !showArchived;
-  updateArchivedToggle();
-  loadComments();
 }
 
 async function handleArchiveAction(id, action) {

@@ -8,6 +8,7 @@ A Chrome extension that captures your YouTube comments and alerts you when they 
 - **Deletion Detection**: Check if your comments have been shadow-deleted or removed
 - **Scheduled Checks**: Run automatic checks every 6/12/24 hours
 - **Comment History**: View all your captured comments with timestamps and video titles
+- **Search & Filters**: Filter by text, video title, status, and recency
 - **Easy Copying**: One-click copy of any saved comment
 - **Export / Import**: Backup comments to JSON/CSV and restore from JSON
 - **Privacy First**: All data stored locally on your device
