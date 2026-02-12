@@ -9,6 +9,7 @@ A Chrome extension that captures your YouTube comments and alerts you when they 
 - **Scheduled Checks**: Run automatic checks every 6/12/24 hours
 - **Comment History**: View all your captured comments with timestamps and video titles
 - **Easy Copying**: One-click copy of any saved comment
+- **Export / Import**: Backup comments to JSON/CSV and restore from JSON
 - **Privacy First**: All data stored locally on your device
 
 ## Installation
@@ -56,6 +57,12 @@ Click the extension icon at any time to see all your captured comments, sorted b
 - Video title
 - Submission timestamp
 - Current status (active or deleted)
+
+### Backup and Restore
+
+- Use **Export JSON** for a full-fidelity backup you can re-import later
+- Use **Export CSV** for spreadsheet analysis
+- Use **Import JSON** to merge comments from a previous backup
 
 ## How It Works
 

@@ -270,6 +270,29 @@
       line-height: 1.4;
     }
 
+    #data-tools {
+      margin-bottom: 12px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    #data-tools button {
+      padding: 6px 10px;
+      background: var(--bg-button);
+      color: var(--text-primary);
+      border: 1px solid var(--border-primary);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      flex: 1;
+      min-width: 100px;
+    }
+
+    #data-tools button:hover {
+      background: var(--bg-button-hover);
+    }
+
     #progress {
       padding: 8px;
       margin-bottom: 12px;
@@ -470,6 +493,13 @@
       <button id="save-settings-btn">Save Auto-Check Settings</button>
     </div>
     <div id="auto-check-meta"></div>
+  </div>
+
+  <div id="data-tools">
+    <button id="export-json-btn">Export JSON</button>
+    <button id="export-csv-btn">Export CSV</button>
+    <button id="import-json-btn">Import JSON</button>
+    <input id="import-json-input" type="file" accept=".json,application/json" class="hidden">
   </div>
 
   <div id="comment-list"></div>

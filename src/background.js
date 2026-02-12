@@ -249,6 +249,170 @@ async function getComments() {
   return comments || {};
 }
 
+function normalizeCommentText(value) {
+  if (!value) return '';
+  return String(value).replace(/\s+/g, ' ').trim();
+}
+
+function escapeCsv(value) {
+  const str = value == null ? '' : String(value);
+  const escaped = str.replace(/"/g, '""');
+  return `"${escaped}"`;
+}
+
+function commentFingerprint(comment) {
+  const normalizedText = normalizeCommentText(comment.text);
+  const submittedAt = Number(comment.submittedAt) || 0;
+  const commentId = comment.commentId || '';
+  const videoId = comment.videoId || '';
+  return `${videoId}|${commentId}|${normalizedText}|${submittedAt}`;
+}
+
+function normalizeImportedComment(rawComment) {
+  if (!rawComment || typeof rawComment !== 'object') {
+    return null;
+  }
+
+  const text = typeof rawComment.text === 'string' ? rawComment.text : '';
+  if (!normalizeCommentText(text)) {
+    return null;
+  }
+
+  const status = [STATUS_ACTIVE, STATUS_DELETED, STATUS_ARCHIVED, STATUS_UNKNOWN].includes(rawComment.status)
+    ? rawComment.status
+    : STATUS_ACTIVE;
+
+  return {
+    id: typeof rawComment.id === 'string' && rawComment.id ? rawComment.id : generateId(),
+    text,
+    videoId: rawComment.videoId || null,
+    videoTitle: rawComment.videoTitle || '',
+    videoUrl: rawComment.videoUrl || null,
+    submittedAt: Number(rawComment.submittedAt) || Date.now(),
+    status,
+    lastCheckedAt: Number(rawComment.lastCheckedAt) || null,
+    deletedAt: Number(rawComment.deletedAt) || null,
+    archivedAt: Number(rawComment.archivedAt) || null,
+    unknownAt: Number(rawComment.unknownAt) || null,
+    unknownReason: rawComment.unknownReason || null,
+    commentId: rawComment.commentId || null,
+    commentUrl: rawComment.commentUrl || null
+  };
+}
+
+async function exportComments(format) {
+  const comments = await getComments();
+  const records = Object.values(comments).sort((a, b) => (b.submittedAt || 0) - (a.submittedAt || 0));
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+
+  if (format === 'csv') {
+    const headers = [
+      'id',
+      'text',
+      'videoId',
+      'videoTitle',
+      'videoUrl',
+      'submittedAt',
+      'status',
+      'lastCheckedAt',
+      'deletedAt',
+      'archivedAt',
+      'unknownAt',
+      'unknownReason',
+      'commentId',
+      'commentUrl'
+    ];
+
+    const lines = [headers.join(',')];
+    records.forEach((comment) => {
+      const row = headers.map((field) => escapeCsv(comment[field]));
+      lines.push(row.join(','));
+    });
+
+    return {
+      filename: `yt-comment-carbon-copy-${timestamp}.csv`,
+      mimeType: 'text/csv;charset=utf-8',
+      content: lines.join('\n')
+    };
+  }
+
+  const payload = {
+    exportedAt: Date.now(),
+    formatVersion: 1,
+    comments: records
+  };
+
+  return {
+    filename: `yt-comment-carbon-copy-${timestamp}.json`,
+    mimeType: 'application/json;charset=utf-8',
+    content: JSON.stringify(payload, null, 2)
+  };
+}
+
+async function importCommentsFromJson(rawText) {
+  if (!rawText || typeof rawText !== 'string') {
+    throw new Error('Import data is empty');
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch {
+    throw new Error('Invalid JSON file');
+  }
+
+  const importedArray = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed?.comments)
+      ? parsed.comments
+      : parsed?.comments && typeof parsed.comments === 'object'
+        ? Object.values(parsed.comments)
+        : [];
+
+  if (importedArray.length === 0) {
+    throw new Error('No comments found in import file');
+  }
+
+  const existing = await getComments();
+  const existingFingerprints = new Set(Object.values(existing).map(commentFingerprint));
+  const nextComments = { ...existing };
+
+  let importedCount = 0;
+  let skippedCount = 0;
+
+  importedArray.forEach((entry) => {
+    const normalized = normalizeImportedComment(entry);
+    if (!normalized) {
+      skippedCount++;
+      return;
+    }
+
+    const fingerprint = commentFingerprint(normalized);
+    if (existingFingerprints.has(fingerprint)) {
+      skippedCount++;
+      return;
+    }
+
+    let id = normalized.id;
+    while (nextComments[id]) {
+      id = generateId();
+    }
+
+    nextComments[id] = { ...normalized, id };
+    existingFingerprints.add(fingerprint);
+    importedCount++;
+  });
+
+  if (importedCount > 0) {
+    await chrome.storage.local.set({ comments: nextComments });
+  }
+
+  return {
+    importedCount,
+    skippedCount
+  };
+}
+
 // Update a comment's status
 async function setCommentStatus(
   id,
@@ -584,6 +748,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .then(comments => sendResponse({ success: true, comments }))
         .catch(error => {
           console.error('[YT Comment Carbon Copy] Get failed:', error);
+          sendResponse({ success: false, error: error.message });
+        });
+      return true;
+
+    case 'EXPORT_COMMENTS':
+      exportComments(message.format)
+        .then((data) => sendResponse({ success: true, ...data }))
+        .catch((error) => {
+          console.error('[YT Comment Carbon Copy] Export failed:', error);
+          sendResponse({ success: false, error: error.message });
+        });
+      return true;
+
+    case 'IMPORT_COMMENTS_JSON':
+      importCommentsFromJson(message.rawText)
+        .then((result) => sendResponse({ success: true, ...result }))
+        .catch((error) => {
+          console.error('[YT Comment Carbon Copy] Import failed:', error);
           sendResponse({ success: false, error: error.message });
         });
       return true;

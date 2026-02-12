@@ -21,6 +21,7 @@ async function init() {
   updateArchivedToggle();
   bindAutoArchiveNoticeDismiss();
   bindSettingsControls();
+  bindDataTools();
   await loadSettings();
   await renderStoredAutoArchiveNotice();
   await loadComments();
@@ -339,6 +340,15 @@ function bindSettingsControls() {
   document.getElementById('auto-check-enabled').addEventListener('change', updateSettingsFormState);
 }
 
+function bindDataTools() {
+  document.getElementById('export-json-btn').addEventListener('click', () => handleExport('json'));
+  document.getElementById('export-csv-btn').addEventListener('click', () => handleExport('csv'));
+  document.getElementById('import-json-btn').addEventListener('click', () => {
+    document.getElementById('import-json-input').click();
+  });
+  document.getElementById('import-json-input').addEventListener('change', handleImportJsonFile);
+}
+
 async function loadSettings() {
   const response = await new Promise((resolve) => {
     chrome.runtime.sendMessage({ action: 'GET_SETTINGS' }, resolve);
@@ -406,6 +416,59 @@ function renderAutoCheckMeta(lastAutoCheck) {
   const timeText = checkedAt.toLocaleString();
   const summary = `${lastAutoCheck.checkedCount || 0} checked, ${lastAutoCheck.deletedCount || 0} deleted, ${lastAutoCheck.unknownCount || 0} unknown`;
   meta.textContent = `Last run: ${timeText} (${summary})`;
+}
+
+async function handleExport(format) {
+  const response = await new Promise((resolve) => {
+    chrome.runtime.sendMessage({ action: 'EXPORT_COMMENTS', format }, resolve);
+  });
+
+  if (chrome.runtime.lastError || !response?.success) {
+    showStatus('Failed to export comments', 'error');
+    return;
+  }
+
+  const blob = new Blob([response.content], { type: response.mimeType || 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = response.filename || `yt-comment-carbon-copy.${format}`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+
+  showStatus(`Exported ${format.toUpperCase()} backup`, 'success');
+}
+
+async function handleImportJsonFile(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) {
+    return;
+  }
+
+  let rawText = '';
+  try {
+    rawText = await file.text();
+  } catch (error) {
+    showStatus('Failed to read import file', 'error');
+    return;
+  }
+
+  const response = await new Promise((resolve) => {
+    chrome.runtime.sendMessage({ action: 'IMPORT_COMMENTS_JSON', rawText }, resolve);
+  });
+
+  if (chrome.runtime.lastError || !response?.success) {
+    showStatus(response?.error || 'Failed to import comments', 'error');
+    return;
+  }
+
+  const imported = response.importedCount || 0;
+  const skipped = response.skippedCount || 0;
+  showStatus(`Imported ${imported} comments. ${skipped} skipped.`, 'success');
+  await loadComments();
 }
 
 function getStatus(comment) {
