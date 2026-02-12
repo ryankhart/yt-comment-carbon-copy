@@ -10,6 +10,7 @@ A Chrome extension that captures your YouTube comments and alerts you when they 
 - **Configurable Auto-Archive**: Keep active feed clean on your own retention window
 - **Comment History**: View all your captured comments with timestamps and video titles
 - **Search & Filters**: Filter by text, video title, status, and recency
+- **Paged History View**: Navigate large comment histories without UI slowdown
 - **Easy Copying**: One-click copy of any saved comment
 - **Export / Import**: Backup comments to JSON/CSV and restore from JSON
 - **Privacy First**: All data stored locally on your device

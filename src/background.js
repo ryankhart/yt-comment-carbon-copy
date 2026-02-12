@@ -6,6 +6,7 @@ const STATUS_ARCHIVED = 'archived';
 const STATUS_UNKNOWN = 'unknown';
 const SETTINGS_KEY = 'settings';
 const LAST_AUTO_CHECK_KEY = 'lastAutoCheck';
+const COMMENTS_BY_VIDEO_KEY = 'commentsByVideo';
 const AUTO_CHECK_ALARM = 'autoCheckComments';
 const SUPPORTED_AUTO_CHECK_INTERVALS = [6, 12, 24];
 const SUPPORTED_AUTO_ARCHIVE_HOURS = [0, 24, 72, 168];
@@ -53,17 +54,93 @@ function buildAutoCheckSummaryMessage(summary) {
   return `Checked ${summary.checkedCount} comments across ${summary.videoCount} videos: ${deletedPart}, ${unknownPart}.`;
 }
 
+function buildCommentsByVideoIndex(comments) {
+  const index = {};
+  Object.values(comments || {}).forEach((comment) => {
+    if (!comment?.videoId || !comment?.id) {
+      return;
+    }
+    if (!index[comment.videoId]) {
+      index[comment.videoId] = [];
+    }
+    index[comment.videoId].push(comment.id);
+  });
+  return index;
+}
+
+function normalizeCommentsByVideoIndex(comments, commentsByVideo) {
+  const validIds = new Set(Object.keys(comments || {}));
+  const normalized = {};
+  const source = commentsByVideo && typeof commentsByVideo === 'object' ? commentsByVideo : {};
+
+  Object.entries(source).forEach(([videoId, ids]) => {
+    if (!videoId || !Array.isArray(ids)) {
+      return;
+    }
+    const filteredIds = ids.filter((id) => validIds.has(id));
+    if (filteredIds.length > 0) {
+      normalized[videoId] = filteredIds;
+    }
+  });
+
+  return normalized;
+}
+
+function indexesEqual(a, b) {
+  const aKeys = Object.keys(a || {});
+  const bKeys = Object.keys(b || {});
+  if (aKeys.length !== bKeys.length) {
+    return false;
+  }
+  for (const key of aKeys) {
+    const aIds = a[key] || [];
+    const bIds = b[key] || [];
+    if (aIds.length !== bIds.length) {
+      return false;
+    }
+    for (let i = 0; i < aIds.length; i++) {
+      if (aIds[i] !== bIds[i]) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+async function getCommentsWithIndex() {
+  const data = await chrome.storage.local.get(['comments', COMMENTS_BY_VIDEO_KEY]);
+  const comments = data.comments || {};
+  const existingIndex = normalizeCommentsByVideoIndex(comments, data[COMMENTS_BY_VIDEO_KEY]);
+  const rebuiltIndex = buildCommentsByVideoIndex(comments);
+
+  if (!indexesEqual(existingIndex, rebuiltIndex)) {
+    await chrome.storage.local.set({ [COMMENTS_BY_VIDEO_KEY]: rebuiltIndex });
+  }
+
+  return {
+    comments,
+    commentsByVideo: rebuiltIndex
+  };
+}
+
 async function ensureStorageDefaults() {
-  const data = await chrome.storage.local.get(['comments', SETTINGS_KEY]);
+  const data = await chrome.storage.local.get(['comments', SETTINGS_KEY, COMMENTS_BY_VIDEO_KEY]);
   const updates = {};
 
+  const comments = data.comments || {};
   if (!data.comments) {
-    updates.comments = {};
+    updates.comments = comments;
   }
 
   const normalizedSettings = normalizeSettings(data[SETTINGS_KEY]);
   if (!data[SETTINGS_KEY] || JSON.stringify(data[SETTINGS_KEY]) !== JSON.stringify(normalizedSettings)) {
     updates[SETTINGS_KEY] = normalizedSettings;
+  }
+
+  const normalizedIndex = normalizeCommentsByVideoIndex(comments, data[COMMENTS_BY_VIDEO_KEY]);
+  const rebuiltIndex = buildCommentsByVideoIndex(comments);
+  if (!data[COMMENTS_BY_VIDEO_KEY] || !indexesEqual(normalizedIndex, rebuiltIndex)) {
+    updates[COMMENTS_BY_VIDEO_KEY] = rebuiltIndex;
   }
 
   if (Object.keys(updates).length > 0) {
@@ -101,7 +178,11 @@ async function updateSettings(patch) {
   return next;
 }
 
-async function maybeNotifyAutoCheck(summary, settings) {
+async function maybeNotifyAutoCheck(summary, settings, trigger) {
+  if (trigger !== 'alarm') {
+    return;
+  }
+
   if (!settings.autoCheckNotifications) {
     return;
   }
@@ -138,10 +219,23 @@ async function runAutoCheckCycle(trigger = 'alarm') {
       return { success: true, skipped: true, reason: 'disabled' };
     }
 
-    const comments = await getComments();
-    const activeComments = Object.values(comments).filter((comment) => {
-      const status = comment.status || STATUS_ACTIVE;
-      return (status === STATUS_ACTIVE || status === STATUS_UNKNOWN) && Boolean(comment.videoId);
+    const { comments, commentsByVideo } = await getCommentsWithIndex();
+    const activeComments = [];
+    const commentsByVideoForCheck = {};
+
+    Object.entries(commentsByVideo).forEach(([videoId, ids]) => {
+      const toCheck = ids
+        .map((id) => comments[id])
+        .filter((comment) => {
+          if (!comment) return false;
+          const status = comment.status || STATUS_ACTIVE;
+          return status === STATUS_ACTIVE || status === STATUS_UNKNOWN;
+        });
+
+      if (toCheck.length > 0) {
+        commentsByVideoForCheck[videoId] = toCheck;
+        activeComments.push(...toCheck);
+      }
     });
 
     if (activeComments.length === 0) {
@@ -158,21 +252,13 @@ async function runAutoCheckCycle(trigger = 'alarm') {
       return { success: true, summary };
     }
 
-    const commentsByVideo = {};
-    activeComments.forEach((comment) => {
-      if (!commentsByVideo[comment.videoId]) {
-        commentsByVideo[comment.videoId] = [];
-      }
-      commentsByVideo[comment.videoId].push(comment);
-    });
-
-    const videoIds = Object.keys(commentsByVideo);
+    const videoIds = Object.keys(commentsByVideoForCheck);
     let deletedCount = 0;
     let archivedCount = 0;
     let unknownCount = 0;
 
     for (const videoId of videoIds) {
-      const result = await handleCheckAllComments(videoId, commentsByVideo[videoId]);
+      const result = await handleCheckAllComments(videoId, commentsByVideoForCheck[videoId]);
       if (!result?.success) {
         continue;
       }
@@ -192,7 +278,7 @@ async function runAutoCheckCycle(trigger = 'alarm') {
     };
 
     await chrome.storage.local.set({ [LAST_AUTO_CHECK_KEY]: summary });
-    await maybeNotifyAutoCheck(summary, settings);
+    await maybeNotifyAutoCheck(summary, settings, trigger);
 
     return { success: true, summary };
   } finally {
@@ -228,8 +314,9 @@ ensureStorageDefaults()
 
 // Save a new comment to storage
 async function saveComment(payload) {
-  const { comments } = await chrome.storage.local.get('comments');
-  const nextComments = comments || {};
+  const { comments, commentsByVideo } = await getCommentsWithIndex();
+  const nextComments = { ...comments };
+  const nextIndex = { ...commentsByVideo };
 
   const id = generateId();
   const comment = {
@@ -250,15 +337,24 @@ async function saveComment(payload) {
   };
 
   nextComments[id] = comment;
-  await chrome.storage.local.set({ comments: nextComments });
+  if (comment.videoId) {
+    const ids = nextIndex[comment.videoId] ? [...nextIndex[comment.videoId]] : [];
+    ids.push(id);
+    nextIndex[comment.videoId] = ids;
+  }
+
+  await chrome.storage.local.set({
+    comments: nextComments,
+    [COMMENTS_BY_VIDEO_KEY]: nextIndex
+  });
 
   return id;
 }
 
 // Get all comments from storage
 async function getComments() {
-  const { comments } = await chrome.storage.local.get('comments');
-  return comments || {};
+  const { comments } = await getCommentsWithIndex();
+  return comments;
 }
 
 function normalizeCommentText(value) {
@@ -416,7 +512,10 @@ async function importCommentsFromJson(rawText) {
   });
 
   if (importedCount > 0) {
-    await chrome.storage.local.set({ comments: nextComments });
+    await chrome.storage.local.set({
+      comments: nextComments,
+      [COMMENTS_BY_VIDEO_KEY]: buildCommentsByVideoIndex(nextComments)
+    });
   }
 
   return {
@@ -516,11 +615,13 @@ async function unarchiveComment(id) {
 
 // Handle checking comments for a specific video
 async function handleCheckComments(videoId) {
-  const comments = await getComments();
+  const { comments, commentsByVideo } = await getCommentsWithIndex();
   const settings = await getSettings();
   const autoArchiveAfterMs = getAutoArchiveAfterMs(settings.autoArchiveHours);
-  const toCheck = Object.values(comments)
-    .filter((c) => c.videoId === videoId && (c.status === STATUS_ACTIVE || c.status === STATUS_UNKNOWN));
+  const commentIds = commentsByVideo[videoId] || [];
+  const toCheck = commentIds
+    .map((id) => comments[id])
+    .filter((c) => c && (c.status === STATUS_ACTIVE || c.status === STATUS_UNKNOWN));
 
   if (toCheck.length === 0) {
     return {
@@ -831,6 +932,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         .then(sendResponse)
         .catch(error => {
           console.error('[YT Comment Carbon Copy] Check failed:', error);
+          sendResponse({ success: false, message: error.message });
+        });
+      return true;
+
+    case 'CHECK_ALL_ACTIVE_COMMENTS':
+      runAutoCheckCycle('manual_batch')
+        .then((result) => {
+          if (!result?.success) {
+            sendResponse({ success: false, message: result?.reason || 'Batch check failed' });
+            return;
+          }
+          sendResponse({
+            success: true,
+            ...result.summary
+          });
+        })
+        .catch((error) => {
+          console.error('[YT Comment Carbon Copy] Manual batch check failed:', error);
           sendResponse({ success: false, message: error.message });
         });
       return true;

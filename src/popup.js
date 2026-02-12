@@ -9,6 +9,7 @@ const STATUS_DELETED = 'deleted';
 const STATUS_ARCHIVED = 'archived';
 const STATUS_UNKNOWN = 'unknown';
 const AUTO_ARCHIVE_NOTICE_KEY = 'autoArchiveNotice';
+const COMMENTS_PER_PAGE = 40;
 const DEFAULT_SETTINGS = {
   autoCheckEnabled: false,
   autoCheckIntervalHours: 12,
@@ -18,12 +19,14 @@ const DEFAULT_SETTINGS = {
 
 let allComments = [];
 let currentSettings = { ...DEFAULT_SETTINGS };
+let currentPage = 1;
 
 async function init() {
   bindAutoArchiveNoticeDismiss();
   bindSettingsControls();
   bindDataTools();
   bindFilterControls();
+  bindPaginationControls();
   await loadSettings();
   await renderStoredAutoArchiveNotice();
   await loadComments();
@@ -54,10 +57,11 @@ async function loadComments() {
 function renderComments(comments) {
   const list = document.getElementById('comment-list');
   const empty = document.getElementById('empty-state');
-  const visibleComments = filterComments(comments);
+  const visibleComments = filterComments(comments).sort((a, b) => b.submittedAt - a.submittedAt);
 
   if (comments.length === 0) {
     list.innerHTML = '';
+    renderPaginationMeta(0, 0);
     empty.innerHTML = EMPTY_DEFAULT_HTML;
     empty.classList.remove('hidden');
     return;
@@ -65,6 +69,7 @@ function renderComments(comments) {
 
   if (visibleComments.length === 0) {
     list.innerHTML = '';
+    renderPaginationMeta(0, 0);
     empty.innerHTML = EMPTY_FILTERED_HTML;
     empty.classList.remove('hidden');
     return;
@@ -72,10 +77,18 @@ function renderComments(comments) {
 
   empty.classList.add('hidden');
 
-  // Sort by date (newest first)
-  const sorted = visibleComments.sort((a, b) => b.submittedAt - a.submittedAt);
+  const totalPages = Math.max(1, Math.ceil(visibleComments.length / COMMENTS_PER_PAGE));
+  if (currentPage > totalPages) {
+    currentPage = totalPages;
+  }
+  if (currentPage < 1) {
+    currentPage = 1;
+  }
+  const start = (currentPage - 1) * COMMENTS_PER_PAGE;
+  const pagedComments = visibleComments.slice(start, start + COMMENTS_PER_PAGE);
 
-  list.innerHTML = sorted.map(createCommentCard).join('');
+  list.innerHTML = pagedComments.map(createCommentCard).join('');
+  renderPaginationMeta(currentPage, totalPages, visibleComments.length);
 
   // Attach copy button handlers
   list.querySelectorAll('.copy-btn').forEach((btn) => {
@@ -107,10 +120,43 @@ function renderComments(comments) {
 }
 
 function bindFilterControls() {
-  const rerender = () => renderComments(allComments);
+  const rerender = () => {
+    currentPage = 1;
+    renderComments(allComments);
+  };
   document.getElementById('filter-query').addEventListener('input', rerender);
   document.getElementById('filter-status').addEventListener('change', rerender);
   document.getElementById('filter-date-range').addEventListener('change', rerender);
+}
+
+function bindPaginationControls() {
+  document.getElementById('prev-page-btn').addEventListener('click', () => {
+    if (currentPage <= 1) return;
+    currentPage -= 1;
+    renderComments(allComments);
+  });
+
+  document.getElementById('next-page-btn').addEventListener('click', () => {
+    currentPage += 1;
+    renderComments(allComments);
+  });
+}
+
+function renderPaginationMeta(page, totalPages, totalItems = 0) {
+  const container = document.getElementById('pagination');
+  const info = document.getElementById('pagination-info');
+  const prev = document.getElementById('prev-page-btn');
+  const next = document.getElementById('next-page-btn');
+
+  if (!totalPages || totalPages <= 1) {
+    container.classList.add('hidden');
+    return;
+  }
+
+  container.classList.remove('hidden');
+  info.textContent = `Page ${page} of ${totalPages} (${totalItems} matches)`;
+  prev.disabled = page <= 1;
+  next.disabled = page >= totalPages;
 }
 
 function filterComments(comments) {
@@ -209,103 +255,43 @@ async function handleCheckAll() {
   checkBtn.disabled = true;
   checkAllBtn.disabled = true;
   showStatus('Starting batch check...', '');
+  showProgress('Checking all active comments...', 35);
 
   try {
     const response = await new Promise((resolve) => {
-      chrome.runtime.sendMessage({ action: 'GET_COMMENTS' }, resolve);
+      chrome.runtime.sendMessage({ action: 'CHECK_ALL_ACTIVE_COMMENTS' }, resolve);
     });
 
-    if (!response?.success) {
-      showStatus('Failed to load comments', 'error');
-      checkBtn.disabled = false;
-      checkAllBtn.disabled = false;
+    if (chrome.runtime.lastError || !response?.success) {
+      showStatus(response?.message || 'Batch check failed', 'error');
       return;
     }
 
-    const allComments = Object.values(response.comments);
-    const activeComments = allComments.filter((c) => {
-      const status = getStatus(c);
-      return (status === STATUS_ACTIVE || status === STATUS_UNKNOWN) && c.videoId;
-    });
-
-    if (activeComments.length === 0) {
+    const checkedCount = response.checkedCount || 0;
+    const totalVideos = response.videoCount || 0;
+    if (checkedCount === 0) {
       showStatus('No active comments to check', 'success');
-      checkBtn.disabled = false;
-      checkAllBtn.disabled = false;
       return;
     }
 
-    // Group comments by video
-    const commentsByVideo = {};
-    for (const comment of activeComments) {
-      if (!commentsByVideo[comment.videoId]) {
-        commentsByVideo[comment.videoId] = [];
-      }
-      commentsByVideo[comment.videoId].push(comment);
-    }
-
-    const videoIds = Object.keys(commentsByVideo);
-    const totalVideos = videoIds.length;
-    let processedVideos = 0;
-    let totalDeleted = 0;
-    let totalArchived = 0;
-    let totalUnknown = 0;
-
-    showProgress(`Checking 0/${totalVideos} videos...`, 0);
-
-    // Process each video
-    for (const videoId of videoIds) {
-      const comments = commentsByVideo[videoId];
-      const videoTitle = comments[0].videoTitle || 'Unknown video';
-
-      showProgress(`Checking "${videoTitle.substring(0, 30)}..." (${processedVideos + 1}/${totalVideos})`,
-                   (processedVideos / totalVideos) * 100);
-
-      try {
-        const result = await new Promise((resolve) => {
-          chrome.runtime.sendMessage(
-            { action: 'CHECK_ALL_COMMENTS', videoId, comments },
-            resolve
-          );
-        });
-
-        if (result?.deletedCount) {
-          totalDeleted += result.deletedCount;
-        }
-        if (result?.archivedCount) {
-          totalArchived += result.archivedCount;
-        }
-        if (result?.unknownCount) {
-          totalUnknown += result.unknownCount;
-        }
-      } catch (error) {
-        console.error(`Failed to check video ${videoId}:`, error);
-      }
-
-      processedVideos++;
-
-      // Small delay between videos to avoid overwhelming YouTube
-      if (processedVideos < totalVideos) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
-
-    hideProgress();
+    const totalDeleted = response.deletedCount || 0;
+    const totalArchived = response.archivedCount || 0;
+    const totalUnknown = response.unknownCount || 0;
     const archivedSummary = totalArchived
       ? ` ${totalArchived} archived.`
       : '';
     const unknownSummary = totalUnknown
       ? ` ${totalUnknown} unknown.`
       : '';
-    showStatus(`Checked ${activeComments.length} comment${activeComments.length !== 1 ? 's' : ''} across ${totalVideos} video${totalVideos !== 1 ? 's' : ''}. ${totalDeleted} deleted.${archivedSummary}${unknownSummary}`, 'success');
+    showStatus(`Checked ${checkedCount} comment${checkedCount !== 1 ? 's' : ''} across ${totalVideos} video${totalVideos !== 1 ? 's' : ''}. ${totalDeleted} deleted.${archivedSummary}${unknownSummary}`, 'success');
     await handleAutoArchiveNotice(totalArchived, currentSettings.autoArchiveHours);
 
     // Refresh the comment list
     await loadComments();
   } catch (error) {
-    hideProgress();
     showStatus('Error during batch check: ' + error.message, 'error');
   } finally {
+    hideProgress();
     checkBtn.disabled = false;
     checkAllBtn.disabled = false;
   }
