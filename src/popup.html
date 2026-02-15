@@ -109,6 +109,13 @@
       color: var(--text-accent);
     }
 
+    #title-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: auto;
+    }
+
     #auto-check-page-btn {
       padding: 5px 8px;
       font-size: 11px;
@@ -121,6 +128,56 @@
     }
 
     #auto-check-page-btn:hover {
+      background: var(--bg-button-hover);
+    }
+
+    #tools-menu-wrapper {
+      position: relative;
+    }
+
+    #more-tools-btn {
+      padding: 5px 8px;
+      font-size: 14px;
+      line-height: 1;
+      background: var(--bg-button);
+      color: var(--text-primary);
+      border: 1px solid var(--border-primary);
+      border-radius: 4px;
+      cursor: pointer;
+      min-width: 32px;
+    }
+
+    #more-tools-btn:hover {
+      background: var(--bg-button-hover);
+    }
+
+    #tools-menu {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 4px);
+      min-width: 130px;
+      border: 1px solid var(--border-primary);
+      border-radius: 6px;
+      background: var(--bg-card);
+      box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18);
+      padding: 4px;
+      z-index: 20;
+    }
+
+    #tools-menu button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      padding: 6px 8px;
+      background: transparent;
+      color: var(--text-primary);
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    #tools-menu button:hover {
       background: var(--bg-button-hover);
     }
 
@@ -232,29 +289,6 @@
       background: var(--bg-primary);
       color: var(--text-primary);
       font-size: 12px;
-    }
-
-    #data-tools {
-      margin-bottom: 12px;
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    #data-tools button {
-      padding: 6px 10px;
-      background: var(--bg-button);
-      color: var(--text-primary);
-      border: 1px solid var(--border-primary);
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-      flex: 1;
-      min-width: 100px;
-    }
-
-    #data-tools button:hover {
-      background: var(--bg-button-hover);
     }
 
     #progress {
@@ -444,7 +478,17 @@
 <body>
   <div id="title-row">
     <h2>YT Comment Carbon Copy</h2>
-    <button id="auto-check-page-btn" type="button">Auto Check</button>
+    <div id="title-actions">
+      <button id="auto-check-page-btn" type="button">Auto Check</button>
+      <div id="tools-menu-wrapper">
+        <button id="more-tools-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-label="More tools">...</button>
+        <div id="tools-menu" class="hidden">
+          <button id="export-json-btn" type="button">Export JSON</button>
+          <button id="export-csv-btn" type="button">Export CSV</button>
+          <button id="import-json-btn" type="button">Import JSON</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="status"></div>
@@ -482,12 +526,7 @@
     </select>
   </div>
 
-  <div id="data-tools">
-    <button id="export-json-btn">Export JSON</button>
-    <button id="export-csv-btn">Export CSV</button>
-    <button id="import-json-btn">Import JSON</button>
-    <input id="import-json-input" type="file" accept=".json,application/json" class="hidden">
-  </div>
+  <input id="import-json-input" type="file" accept=".json,application/json" class="hidden">
 
   <div id="comment-list"></div>
   <div id="pagination" class="hidden">

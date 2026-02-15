@@ -365,12 +365,51 @@ function bindNavigationControls() {
 }
 
 function bindDataTools() {
-  document.getElementById('export-json-btn').addEventListener('click', () => handleExport('json'));
-  document.getElementById('export-csv-btn').addEventListener('click', () => handleExport('csv'));
-  document.getElementById('import-json-btn').addEventListener('click', () => {
-    document.getElementById('import-json-input').click();
+  const menuButton = document.getElementById('more-tools-btn');
+  const menu = document.getElementById('tools-menu');
+  const importInput = document.getElementById('import-json-input');
+
+  const closeMenu = () => {
+    menu.classList.add('hidden');
+    menuButton.setAttribute('aria-expanded', 'false');
+  };
+
+  const toggleMenu = (event) => {
+    event.stopPropagation();
+    const isOpen = !menu.classList.contains('hidden');
+    if (isOpen) {
+      closeMenu();
+      return;
+    }
+    menu.classList.remove('hidden');
+    menuButton.setAttribute('aria-expanded', 'true');
+  };
+
+  menuButton.addEventListener('click', toggleMenu);
+  document.addEventListener('click', (event) => {
+    if (menu.classList.contains('hidden')) return;
+    if (menu.contains(event.target) || menuButton.contains(event.target)) return;
+    closeMenu();
   });
-  document.getElementById('import-json-input').addEventListener('change', handleImportJsonFile);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeMenu();
+    }
+  });
+
+  document.getElementById('export-json-btn').addEventListener('click', async () => {
+    closeMenu();
+    await handleExport('json');
+  });
+  document.getElementById('export-csv-btn').addEventListener('click', async () => {
+    closeMenu();
+    await handleExport('csv');
+  });
+  document.getElementById('import-json-btn').addEventListener('click', () => {
+    closeMenu();
+    importInput.click();
+  });
+  importInput.addEventListener('change', handleImportJsonFile);
 }
 
 async function loadSettings() {
