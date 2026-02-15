@@ -95,10 +95,33 @@
       background: var(--bg-primary);
     }
 
+    #title-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      gap: 8px;
+    }
+
     h2 {
       font-size: 16px;
-      margin-bottom: 12px;
+      margin: 0;
       color: var(--text-accent);
+    }
+
+    #auto-check-page-btn {
+      padding: 5px 8px;
+      font-size: 11px;
+      background: var(--bg-button);
+      color: var(--text-primary);
+      border: 1px solid var(--border-primary);
+      border-radius: 4px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    #auto-check-page-btn:hover {
+      background: var(--bg-button-hover);
     }
 
     #status {
@@ -209,74 +232,6 @@
       background: var(--bg-primary);
       color: var(--text-primary);
       font-size: 12px;
-    }
-
-    #auto-check-settings {
-      margin-bottom: 12px;
-      padding: 10px;
-      border: 1px solid var(--border-primary);
-      border-radius: 6px;
-      background: var(--bg-secondary);
-      font-size: 12px;
-    }
-
-    #auto-check-settings h3 {
-      font-size: 12px;
-      margin-bottom: 8px;
-      color: var(--text-secondary);
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.03em;
-    }
-
-    .setting-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 8px;
-    }
-
-    .setting-row:last-of-type {
-      margin-bottom: 6px;
-    }
-
-    .setting-row label {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      color: var(--text-primary);
-      flex: 1;
-    }
-
-    #auto-check-interval,
-    #auto-archive-hours {
-      width: 100%;
-      padding: 5px 6px;
-      border: 1px solid var(--border-primary);
-      border-radius: 4px;
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      font-size: 12px;
-    }
-
-    #save-settings-btn {
-      padding: 6px 10px;
-      background: var(--bg-button);
-      color: var(--text-primary);
-      border: 1px solid var(--border-primary);
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 12px;
-    }
-
-    #save-settings-btn:hover {
-      background: var(--bg-button-hover);
-    }
-
-    #auto-check-meta {
-      color: var(--text-secondary);
-      font-size: 11px;
-      line-height: 1.4;
     }
 
     #data-tools {
@@ -487,7 +442,10 @@
 </head>
 
 <body>
-  <h2>YT Comment Carbon Copy</h2>
+  <div id="title-row">
+    <h2>YT Comment Carbon Copy</h2>
+    <button id="auto-check-page-btn" type="button">Auto Check</button>
+  </div>
 
   <div id="status"></div>
   <div id="auto-archive-notice" class="hidden">
@@ -511,7 +469,7 @@
     <input id="filter-query" type="search" placeholder="Search text or video title">
     <select id="filter-status">
       <option value="all">All statuses</option>
-      <option value="active">Active</option>
+      <option value="active" selected>Active</option>
       <option value="deleted">Deleted</option>
       <option value="unknown">Unknown</option>
       <option value="archived">Archived</option>
@@ -522,43 +480,6 @@
       <option value="30">Last 30 days</option>
       <option value="90">Last 90 days</option>
     </select>
-  </div>
-
-  <div id="auto-check-settings">
-    <h3>Auto Check</h3>
-    <div class="setting-row">
-      <label>
-        <input type="checkbox" id="auto-check-enabled">
-        Enable scheduled checks
-      </label>
-    </div>
-    <div class="setting-row">
-      <label for="auto-check-interval">Run every</label>
-      <select id="auto-check-interval">
-        <option value="6">6 hours</option>
-        <option value="12">12 hours</option>
-        <option value="24">24 hours</option>
-      </select>
-    </div>
-    <div class="setting-row">
-      <label for="auto-archive-hours">Auto-archive after</label>
-      <select id="auto-archive-hours">
-        <option value="0">Never</option>
-        <option value="24">24 hours</option>
-        <option value="72">3 days</option>
-        <option value="168">7 days</option>
-      </select>
-    </div>
-    <div class="setting-row">
-      <label>
-        <input type="checkbox" id="auto-check-notify">
-        Notify when deleted/unknown comments are found
-      </label>
-    </div>
-    <div class="setting-row">
-      <button id="save-settings-btn">Save Auto-Check Settings</button>
-    </div>
-    <div id="auto-check-meta"></div>
   </div>
 
   <div id="data-tools">

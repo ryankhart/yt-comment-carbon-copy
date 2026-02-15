@@ -8,6 +8,7 @@ const STATUS_ACTIVE = 'active';
 const STATUS_DELETED = 'deleted';
 const STATUS_ARCHIVED = 'archived';
 const STATUS_UNKNOWN = 'unknown';
+const DEFAULT_STATUS_FILTER = STATUS_ACTIVE;
 const AUTO_ARCHIVE_NOTICE_KEY = 'autoArchiveNotice';
 const COMMENTS_PER_PAGE = 40;
 const DEFAULT_SETTINGS = {
@@ -23,10 +24,11 @@ let currentPage = 1;
 
 async function init() {
   bindAutoArchiveNoticeDismiss();
-  bindSettingsControls();
+  bindNavigationControls();
   bindDataTools();
   bindFilterControls();
   bindPaginationControls();
+  initializeDefaultFilters();
   await loadSettings();
   await renderStoredAutoArchiveNotice();
   await loadComments();
@@ -127,6 +129,10 @@ function bindFilterControls() {
   document.getElementById('filter-query').addEventListener('input', rerender);
   document.getElementById('filter-status').addEventListener('change', rerender);
   document.getElementById('filter-date-range').addEventListener('change', rerender);
+}
+
+function initializeDefaultFilters() {
+  document.getElementById('filter-status').value = DEFAULT_STATUS_FILTER;
 }
 
 function bindPaginationControls() {
@@ -352,9 +358,10 @@ function showStatus(message, type) {
   status.className = type || '';
 }
 
-function bindSettingsControls() {
-  document.getElementById('save-settings-btn').addEventListener('click', handleSaveSettings);
-  document.getElementById('auto-check-enabled').addEventListener('change', updateSettingsFormState);
+function bindNavigationControls() {
+  document.getElementById('auto-check-page-btn').addEventListener('click', () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('auto-check.html') });
+  });
 }
 
 function bindDataTools() {
@@ -372,70 +379,11 @@ async function loadSettings() {
   });
 
   if (chrome.runtime.lastError || !response?.success) {
-    showStatus('Failed to load auto-check settings', 'error');
-    applySettingsToForm(DEFAULT_SETTINGS);
-    renderAutoCheckMeta(null);
+    currentSettings = { ...DEFAULT_SETTINGS };
     return;
   }
 
-  applySettingsToForm(response.settings || DEFAULT_SETTINGS);
-  renderAutoCheckMeta(response.lastAutoCheck || null);
-}
-
-function applySettingsToForm(settings) {
-  const normalized = { ...DEFAULT_SETTINGS, ...(settings || {}) };
-  currentSettings = normalized;
-  document.getElementById('auto-check-enabled').checked = Boolean(normalized.autoCheckEnabled);
-  document.getElementById('auto-check-notify').checked = Boolean(normalized.autoCheckNotifications);
-  document.getElementById('auto-check-interval').value = String(normalized.autoCheckIntervalHours);
-  document.getElementById('auto-archive-hours').value = String(normalized.autoArchiveHours);
-  updateSettingsFormState();
-}
-
-function updateSettingsFormState() {
-  const enabled = document.getElementById('auto-check-enabled').checked;
-  document.getElementById('auto-check-interval').disabled = !enabled;
-  document.getElementById('auto-check-notify').disabled = !enabled;
-}
-
-function setSettingsSaving(isSaving) {
-  document.getElementById('save-settings-btn').disabled = isSaving;
-}
-
-async function handleSaveSettings() {
-  const payload = {
-    autoCheckEnabled: document.getElementById('auto-check-enabled').checked,
-    autoCheckIntervalHours: Number(document.getElementById('auto-check-interval').value),
-    autoCheckNotifications: document.getElementById('auto-check-notify').checked,
-    autoArchiveHours: Number(document.getElementById('auto-archive-hours').value)
-  };
-
-  setSettingsSaving(true);
-  const response = await new Promise((resolve) => {
-    chrome.runtime.sendMessage({ action: 'UPDATE_SETTINGS', payload }, resolve);
-  });
-  setSettingsSaving(false);
-
-  if (chrome.runtime.lastError || !response?.success) {
-    showStatus('Failed to save auto-check settings', 'error');
-    return;
-  }
-
-  applySettingsToForm(response.settings || DEFAULT_SETTINGS);
-  showStatus(payload.autoCheckEnabled ? 'Scheduled checks enabled' : 'Scheduled checks disabled', 'success');
-}
-
-function renderAutoCheckMeta(lastAutoCheck) {
-  const meta = document.getElementById('auto-check-meta');
-  if (!lastAutoCheck?.checkedAt) {
-    meta.textContent = 'No auto-check has run yet.';
-    return;
-  }
-
-  const checkedAt = new Date(lastAutoCheck.checkedAt);
-  const timeText = checkedAt.toLocaleString();
-  const summary = `${lastAutoCheck.checkedCount || 0} checked, ${lastAutoCheck.deletedCount || 0} deleted, ${lastAutoCheck.unknownCount || 0} unknown`;
-  meta.textContent = `Last run: ${timeText} (${summary})`;
+  currentSettings = { ...DEFAULT_SETTINGS, ...(response.settings || {}) };
 }
 
 async function handleExport(format) {
